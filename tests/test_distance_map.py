@@ -1,6 +1,11 @@
+import math
+from collections import deque
 
 import numpy as np
+import pytest
 
+from flatland.core.distance_map_walker import DistanceMapWalker
+from flatland.core.env_observation_builder import DummyObservationBuilder
 from flatland.core.grid.grid4 import Grid4TransitionsEnum
 from flatland.envs.grid.distance_map import DistanceMap
 from flatland.envs.grid.rail_env_grid import RailEnvTransitions
@@ -70,26 +75,79 @@ def test_walker():
     assert env.distance_map.get()[(0, *[0, 2], 1)] == 2
 
 
-def test_distances_recomputed_identically_after_reset():
+def test_distances_follow_the_rail_after_reset():
     """
-    Resetting the env with the same seed regenerates the same rail and targets, so the distance map computed after the
-    second reset equals the one computed after the first: no state of the first computation leaks into the second.
+    Three agents on a 30x30 sparse rail, whose distance map was computed once.
+    - Setup: the distance map is reset onto a copy of the rail where one cell of agent 0's shortest path (not a target
+      cell) has no transitions, with the same agents and targets.
+    - Agent 0's distances change, and all distances equal those of a new `DistanceMap` built on the modified rail.
     """
-    env = _make_simple_env()
+    env = RailEnv(width=30, height=30, number_of_agents=3, rail_generator=sparse_rail_generator(max_num_cities=3),
+                  line_generator=sparse_line_generator(), obs_builder_object=DummyObservationBuilder())
     env.reset(random_seed=1)
-    first = np.copy(env.distance_map.get())
-    env.reset(random_seed=1)
-    second = env.distance_map.get()
-    assert np.array_equal(first, second)
+    before = np.copy(env.distance_map.get())
+    target_cells = {target[0] for agent in env.agents for target in agent.targets}
+    grid = env.rail.grid.copy()
+    cut = next(w.position for w in env.distance_map.get_shortest_paths()[0][1:] if w.position not in target_cells)
+    grid[cut] = 0
+    modified_rail = RailGridTransitionMap(width=env.width, height=env.height, transitions=env.rail.transitions)
+    modified_rail.grid = grid
+
+    env.distance_map.reset(env.agents, modified_rail)
+    after = env.distance_map.get()
+    fresh = DistanceMap(env.agents, env.height, env.width)
+    fresh.reset(env.agents, modified_rail)
+    assert not np.array_equal(before[0], after[0])
+    assert np.array_equal(after, fresh.get())
+
+
+class _DigraphRail:
+    """A rail given by the predecessors of each entry point."""
+
+    def __init__(self, edges):
+        self.predecessors = {}
+        for source, target in edges:
+            self.predecessors.setdefault(target, []).append(source)
+
+    def get_predecessor_entry_points(self, entry_point):
+        return self.predecessors.get(entry_point, [])
+
+
+def _distances_one_search_per_target(rail, targets):
+    """Reference: one backward breadth-first search per target, then the minimum over targets."""
+    best = {}
+    for target in targets:
+        distances = {target: 0}
+        queue = deque([target])
+        while queue:
+            entry_point = queue.popleft()
+            for predecessor in rail.get_predecessor_entry_points(entry_point):
+                if predecessor not in distances:
+                    distances[predecessor] = distances[entry_point] + 1
+                    queue.append(predecessor)
+        for entry_point, distance in distances.items():
+            best[entry_point] = min(best.get(entry_point, math.inf), distance)
+    return best
+
+
+@pytest.mark.parametrize("targets", [["a"], ["a", "c"], ["c", "a", "a"], ["e"], ["a", "f"], []])
+def test_walker_on_a_looped_rail_matches_one_search_per_target(targets):
+    """
+    A loop a -> b -> c -> d -> a, a branch e -> b into it, a branch d -> f out of it, and a self-loop on c. Walked
+    backwards from one target, two targets on the loop (each reachable from the other), repeated targets, a target
+    with no predecessors, a target on each side of the exit, and none.
+    - The distance of every entry point to its nearest target equals the minimum over targets of one backward search
+      per target.
+    """
+    rail = _DigraphRail([("a", "b"), ("b", "c"), ("c", "d"), ("d", "a"), ("e", "b"), ("d", "f"), ("c", "c")])
+    assert DistanceMapWalker(None)._distance_map_walker(rail, targets) == _distances_one_search_per_target(rail, targets)
 
 
 def test_loaded_distance_map_is_used_for_shortest_paths():
     """
-    Regression test: a distance map populated via `.set(...)` (as `RailEnv`/`RailEnvPersister` do when
-    loading a precomputed distance map from a saved rail/env file, bypassing `_compute()`/the BFS walk)
-    must still be usable by `get_shortest_paths()`/`geometric_distance()`. Reading only the internal BFS
-    scratch cache (which stays empty in this scenario) instead of the actual populated per-agent storage
-    silently produced `None` paths for every agent despite a perfectly valid loaded distance map.
+    Regression test: a distance map populated via `.set(...)` (as when loading a precomputed distance map from a
+    saved rail/env file, without computing it) is used by `get_shortest_paths()`/`geometric_distance()`, which give
+    the same paths as for the computed distance map.
     """
     env = _make_simple_env()
     env.reset(random_seed=1)  # seed known to place agent 0 with a valid (non-None) shortest path
@@ -109,11 +167,9 @@ def test_loaded_distance_map_is_used_for_shortest_paths():
 
 def test_agent_with_no_valid_targets_does_not_crash():
     """
-    Regression test: `geometric_distance()`'s minimum over an agent's target entry points must not
-    raise `ValueError: min() arg is an empty sequence` for an agent whose `targets` set has become empty
-    (e.g. via `RailEnvPersister.set_full_state`'s post-load filtering to only rail-valid entry points,
-    which can filter out every target). The old pre-refactor code had no such min() and never crashed
-    on this; `get_shortest_paths()` should keep returning `None` (no path found) for that agent instead.
+    Regression test: an agent whose `targets` set has become empty (e.g. via `RailEnvPersister.set_full_state`'s
+    post-load filtering to only rail-valid entry points, which can filter out every target) does not make the
+    distance map computation raise, and `get_shortest_paths()` returns `None` (no path found) for that agent.
     """
     env = RailEnv(width=25, height=25,
                   rail_generator=sparse_rail_generator(max_num_cities=3, seed=1),

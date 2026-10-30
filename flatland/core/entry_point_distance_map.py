@@ -12,7 +12,7 @@ WaypointT = TypeVar('WaypointT')
 
 
 def _infinite_distance():
-    # kept so that pickles holding the former `distances` defaultdict (which used it as factory) still load
+    # module-level, hence picklable, default factory of `GraphDistanceMap`'s defaultdicts
     return math.inf
 
 

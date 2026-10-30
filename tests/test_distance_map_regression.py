@@ -39,7 +39,9 @@ def _graph_digest(seed):
     env = GraphRailEnv.from_rail_env(_env(seed, 0.0, 2), observation_builder=DummyObservationBuilder(), seed=seed)
     env.reset(random_seed=seed)
     dm = env.distance_map.get()
-    return hashlib.sha256(json.dumps({str(k): sorted((str(ep), float(d)) for ep, d in v.items()) for k, v in sorted(dm.items())}).encode()).hexdigest()
+    # finite distances only: reading a missing entry of the defaultdicts inserts an infinite one
+    return hashlib.sha256(json.dumps({str(k): sorted((str(ep), float(d)) for ep, d in v.items() if d != np.inf)
+                                      for k, v in sorted(dm.items())}).encode()).hexdigest()
 
 
 @pytest.mark.parametrize("seed, p_level_free, line_length, expected", [
@@ -50,12 +52,11 @@ def test_grid_distance_map_unchanged(seed, p_level_free, line_length, expected):
     """
     Twelve agents on a 40x40 sparse rail with four cities, once without level-free crossings and lines of two stops,
     once with level-free crossings and lines of three stops.
-    - The timetable, the distance map after reset, and the distance map of a clone of the env
-      hash to the values recorded with flatland-rl 4.3.
+    - The timetable, the distance map after reset, and the distance map of a clone of the env hash to a fixed digest.
     """
     assert _grid_digest(seed, p_level_free, line_length) == expected
 
 
 def test_graph_distance_map_unchanged():
-    """The distance map of a `GraphRailEnv` converted from a 40x40 grid env hashes to the value recorded with flatland-rl 4.3."""
+    """The finite distances of a `GraphRailEnv` converted from a 40x40 grid env hash to a fixed digest."""
     assert _graph_digest(1) == "6a439bd0488a657b3ed2d7d41fcc063aaac2894b6cd00575d8f35730e0ab18d0"
