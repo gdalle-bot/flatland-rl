@@ -21,7 +21,7 @@ from flatland.envs.malfunction_generators import ParamMalfunctionGen, Malfunctio
 from flatland.envs.observations import GlobalObsForRailEnv, TreeObsForRailEnv
 from flatland.envs.persistence import RailEnvPersister
 from flatland.envs.predictions import ShortestPathPredictorForRailEnv
-from flatland.envs.rail_env import RailEnv, RailEnvActions
+from flatland.envs.rail_env import CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, RailEnv, RailEnvActions
 from flatland.envs.rail_env_state_machine_wrapper import RailEnvStateMachineWrapper
 from flatland.envs.rail_generators import rail_from_grid_transition_map
 from flatland.envs.rail_generators import sparse_rail_generator, rail_from_file
@@ -2732,3 +2732,39 @@ def test_railenvwrapper_matches_unwrapped_control_flow(seed):
             break
 
     assert any_real_state_diverged_from_derived_fallback
+
+
+@pytest.mark.parametrize(
+    "env_value, explicit, expected",
+    [
+        (None, None, False),
+        ("", None, False),
+        ("0", None, False),
+        ("false", None, False),
+        ("1", None, True),
+        ("TRUE", None, True),
+        (" yes ", None, True),
+        ("1", False, False),
+        ("0", True, True),
+        (None, True, True),
+    ],
+)
+def test_check_step_pre_post_conditions_default(monkeypatch, env_value, explicit, expected):
+    """
+    `check_step_pre_post_conditions` defaults to the `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` environment variable
+    (off unless `1`/`true`/`yes`), and an explicit constructor argument always wins over it.
+    """
+    if env_value is None:
+        monkeypatch.delenv(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, env_value)
+    kwargs = {} if explicit is None else {"check_step_pre_post_conditions": explicit}
+    env = RailEnv(width=30, height=30, **kwargs)
+    assert env.check_step_pre_post_conditions is expected
+
+
+def test_test_suite_runs_with_step_checks_on():
+    """The repository-root conftest.py turns the step checks on for every test that doesn't set them explicitly."""
+    assert os.environ.get(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR) is not None
+    assert RailEnv(width=30, height=30).check_step_pre_post_conditions is (
+        os.environ[CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR].strip().lower() in ("1", "true", "yes"))

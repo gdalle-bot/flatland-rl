@@ -1,6 +1,7 @@
 """
 Definition of the RailEnv environment.
 """
+import os
 import pickle
 import random
 import warnings
@@ -69,6 +70,18 @@ class PreStepSnapshot(NamedTuple):
     """
     candidate_entry_point_independents: Dict[int, Optional[EntryPointT]]
     agents: Dict[int, PreStepAgentSnapshot]
+
+
+CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR = "FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS"
+
+
+def default_check_step_pre_post_conditions() -> bool:
+    """
+    Default for `check_step_pre_post_conditions` when the constructor argument is `None`: on if the environment
+    variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` is `1`, `true` or `yes` (case-insensitive), off otherwise.
+    The test suite turns it on (`tests/conftest.py`).
+    """
+    return os.environ.get(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, "").strip().lower() in ("1", "true", "yes")
 
 
 class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPointT]):
@@ -149,8 +162,11 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
     braking_delta : float
         Determines how much speed is decreased by STOP_MOVING action.
         As speed is between 0.0 and 1.0, braking_delta=-1.0 restores to previous full stop behaviour.
-    check_step_pre_post_conditions : bool
-        Set to False to skip checking step() pre- and postconditions, e.g. in performance-sensitive production use.
+    check_step_pre_post_conditions : Optional[bool]
+        Whether step() checks its pre- and postconditions. They verify every agent's update and add about 40-50% to
+        the cost of a step without observations. `None` (default) defers to `default_check_step_pre_post_conditions()`,
+        i.e. the environment variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS`, which is unset (off) unless set
+        explicitly. The test suite turns it on.
     rewards : DefaultRewards
         The rewards function to use. Defaults to standard settings of Flatland 3 behaviour.
     effects_generator : Optional[EffectsGenerator["RailEnv"]]
@@ -182,7 +198,7 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
                  timetable_generator=ttg.timetable_generator,
                  acceleration_delta: Fraction = Fraction(1),
                  braking_delta: Fraction = -Fraction(1),
-                 check_step_pre_post_conditions: bool = True,
+                 check_step_pre_post_conditions: Optional[bool] = None,
                  rewards: Rewards = None,
                  effects_generator: EffectsGenerator["RailEnv"] = None,
                  distance_map: AgentSourceTargetDistanceMap = None,
@@ -249,6 +265,8 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
 
         self.acceleration_delta = acceleration_delta
         self.braking_delta = braking_delta
+        if check_step_pre_post_conditions is None:
+            check_step_pre_post_conditions = default_check_step_pre_post_conditions()
         self.check_step_pre_post_conditions = check_step_pre_post_conditions
 
         mf = mfg.MalfunctionEffectsGenerator(self.malfunction_generator)
@@ -1609,7 +1627,7 @@ class RailEnv(AbstractRailEnv[GridTransitionMap, GridResourceMap, Tuple[Tuple[in
                  timetable_generator=ttg.timetable_generator,
                  acceleration_delta=1.0,
                  braking_delta=-1.0,
-                 check_step_pre_post_conditions: bool = True,
+                 check_step_pre_post_conditions: Optional[bool] = None,
                  rewards: Rewards = None,
                  effects_generator: EffectsGenerator["RailEnv"] = None
                  ):
