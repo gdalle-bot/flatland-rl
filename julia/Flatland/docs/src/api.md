@@ -1,5 +1,5 @@
 # API reference
 
-```@docs
-Flatland
+```@autodocs
+Modules = [Flatland]
 ```

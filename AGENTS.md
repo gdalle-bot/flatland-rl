@@ -404,11 +404,14 @@ how `step()`, `TrainStateMachine`, or `MotionCheck` internally arrive at that ou
   (same as `tox -e coverage`).
 - `julia/Flatland/` — the Julia package `Flatland.jl`, a port of the simulator that must reproduce the Python
   trajectories exactly (work in progress, see `REVAMP.md` §4). It is a separate package with its own `Project.toml`,
-  tests and docs, and its own CI (`.github/workflows/julia.yml`, triggered by changes under `julia/`). It is not part
-  of the Python package: `MANIFEST.in` prunes it from the sdist, and release-please ignores it. Run its tests with
-  `julia --project=julia/Flatland -e 'using Pkg; Pkg.test()'`; format with Runic, installed once with
-  `julia --project=@runic -e 'using Pkg; Pkg.add("Runic")'`
-  (`julia --project=@runic -e 'using Runic; exit(Runic.main(["--inplace", "julia"]))'`).
+  tests and docs, and its own CI (`.github/workflows/julia.yml`, triggered by changes under `julia/` or
+  `tests/conformance/`). It is not part of the Python package: `MANIFEST.in` prunes it from the sdist, and
+  release-please ignores it. Run its tests with `julia --project=julia/Flatland -e 'using Pkg; Pkg.test()'`; format
+  with Runic, installed once with `julia --project=@runic -e 'using Pkg; Pkg.add("Runic")'`
+  (`julia --project=@runic -e 'using Runic; exit(Runic.main(["--inplace", "julia"]))'`). Its conformance data
+  (`julia/Flatland/test/data/*.json`) is exported from the Python package by the scripts in `tests/conformance/`,
+  e.g. `python tests/conformance/export_topology.py julia/Flatland/test/data/topology.json`; re-export it after
+  changing the Python semantics it covers (`.github/workflows/conformance.yml` fails while it is out of date).
 
 ### CLI entry points (`pyproject.toml`'s `[project.scripts]`, implemented in `cli.py`)
 

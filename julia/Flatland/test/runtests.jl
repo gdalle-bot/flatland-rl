@@ -16,4 +16,7 @@ using Test
             JET.test_package(Flatland; target_modules = (Flatland,))
         end
     end
+    @testset verbose = true "Topology" begin
+        include("topology.jl")
+    end
 end
