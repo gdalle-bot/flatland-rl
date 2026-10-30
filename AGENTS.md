@@ -401,7 +401,10 @@ how `step()`, `TrainStateMachine`, or `MotionCheck` internally arrive at that ou
   trajectories exactly (work in progress, see `REVAMP.md` §4). It is a separate package with its own `Project.toml`,
   tests and docs, and its own CI (`.github/workflows/julia.yml`, triggered only by changes under `julia/`). Run its
   tests with `julia --project=julia/Flatland -e 'using Pkg; Pkg.test()'`; format with Runic
-  (`julia --project=@runic -e 'using Runic; exit(Runic.main(["--inplace", "julia"]))'`).
+  (`julia --project=@runic -e 'using Runic; exit(Runic.main(["--inplace", "julia"]))'`). Its conformance data
+  (`julia/Flatland/test/data/*.json`) is exported from the Python package by the scripts in `tests/conformance/`,
+  e.g. `python tests/conformance/export_candidates.py julia/Flatland/test/data/candidates.json`; re-export it after
+  changing the Python semantics it covers.
 
 ### CLI entry points (`pyproject.toml`'s `[project.scripts]`, implemented in `cli.py`)
 
