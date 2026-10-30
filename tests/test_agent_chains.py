@@ -1,5 +1,7 @@
 from typing import Tuple, List
 
+import numpy as np
+
 import networkx as nx
 from matplotlib import pyplot as plt
 
@@ -433,3 +435,70 @@ def test_edge_case():
     mc.find_conflicts()
     assert mc.stopped == {2, 3, 5, 6}
     assert mc.deadlocked == {3, 5}
+
+
+class _SlicingMotionCheck(MotionCheck):
+    """`MotionCheck` with the conflict queue processed as in flatland-rl 4.3 (re-slicing the list at every pop)."""
+
+    def _fix_conflicts(self, target_conflicts):
+        while len(target_conflicts) > 0:
+            u, v = target_conflicts[0]
+            u_pos, u_target = self.agents[u]
+            v_pos, v_target = self.agents[v]
+            if v_pos == v_target:
+                target_conflicts = self._stop_and_update_target_conflicts(target_conflicts, u, u_pos, u_target)
+            elif u_target == v_target:
+                target_conflicts = self._stop_and_update_target_conflicts(target_conflicts, v, v_pos, v_target)
+            target_conflicts = target_conflicts[1:]
+
+
+def _random_motion_check_inputs(rng):
+    """Random agents on up to 8 cells. As in the env, each cell is held by at most one agent."""
+    n_agents = int(rng.integers(1, 13))
+    cells = [(int(r), int(c)) for r, c in rng.integers(0, 4, size=(int(rng.integers(2, 9)), 2))]
+    occupied = set()
+    inputs = []
+    for i in range(n_agents):
+        r1 = None
+        if rng.random() < 0.8:
+            r1 = cells[int(rng.integers(len(cells)))]
+            if r1 in occupied:
+                r1 = None
+            else:
+                occupied.add(r1)
+        u = rng.random()
+        r2 = r1 if u < 0.3 else (None if u < 0.4 else cells[int(rng.integers(len(cells)))])
+        inputs.append((i, r1, r2))
+    return inputs
+
+
+def test_motion_check_matches_slicing_queue():
+    """
+    5000 random configurations of up to 12 agents, each holding its own cell or off the map and asking for its own cell,
+    another cell or none, on up to 8 cells (so that swaps, chains and same-target conflicts are frequent). For each,
+    the stopped and deadlocked agents and the movement decision of every agent equal those of the previous MotionCheck,
+    which processed its conflict queue by re-slicing a list.
+    """
+    rng = np.random.default_rng(0)
+    for _ in range(5000):
+        inputs = _random_motion_check_inputs(rng)
+        new, old = MotionCheck(), _SlicingMotionCheck()
+        for mc in (new, old):
+            for i, r1, r2 in inputs:
+                mc.add_agent(i, r1, r2)
+            mc.find_conflicts()
+        assert new.stopped == old.stopped, inputs
+        assert new.deadlocked == old.deadlocked, inputs
+        assert [new.check_resource(i) for i, _, _ in inputs] == [old.check_resource(i) for i, _, _ in inputs], inputs
+
+
+def test_motion_check_many_agents_queued_for_one_cell():
+    """
+    200 agents, each on its own cell, all ask for the same free cell. Only agent 0 (lowest handle) may move; all
+    others are stopped. With the conflict queue processed in place this takes well under a second.
+    """
+    mc = MotionCheck()
+    for i in range(200):
+        mc.add_agent(i, (i + 1, 0), (0, 0))
+    mc.find_conflicts()
+    assert [i for i in range(200) if mc.check_resource(i)] == [0]

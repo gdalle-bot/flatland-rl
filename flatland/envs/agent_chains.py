@@ -354,8 +354,10 @@ class MotionCheck(object):
         return target_conflicts
 
     def _fix_conflicts(self, target_conflicts):
-        while len(target_conflicts) > 0:
-            u, v = target_conflicts[0]
+        # first-in first-out over target_conflicts, which grows at the end while it is processed
+        head = 0
+        while head < len(target_conflicts):
+            u, v = target_conflicts[head]
             u_pos, u_target = self.agents[u]
             v_pos, v_target = self.agents[v]
             if v_pos == v_target:
@@ -365,7 +367,7 @@ class MotionCheck(object):
                 # v wants to move and they have same target, then stop v, which has larger index (lower index wins)
                 target_conflicts = self._stop_and_update_target_conflicts(target_conflicts, v, v_pos, v_target)
             # else: no conflict any more, forget
-            target_conflicts = target_conflicts[1:]
+            head += 1
 
     def _stop_and_update_target_conflicts(self, target_conflicts, v, v_pos, v_target):
         self.agents[v] = (v_pos, v_pos)
