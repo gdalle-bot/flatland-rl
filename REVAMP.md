@@ -507,6 +507,12 @@ Found by reading [read]. Each needs a failing test before its fix.
 13. **`PolicyRunner.create_from_policy` shares the caller's state with a second env.** It hands `env.obs_builder`,
     `env.rewards` and `env.effects_generator` to an env loaded from a snapshot (`policy_runner.py:105-129`), which
     rebinds the builder to itself and accumulates its rewards into the caller's per-episode reward state.
+14. **Graph-env shortest paths depend on `PYTHONHASHSEED`.** `GraphTransitionMap.get_successor_entry_points` returns a
+    set of node strings (`rail_graph_transition_map.py:173-174`), and the shortest-path walk breaks ties between
+    equally short successors by that set's order. Predictions, shortest-path travel times and timetables of graph envs
+    follow, and can differ from the grid env they were converted from.
+15. **`PunctualityRewards` counts at most one punctual intermediate stop.** The `break` after
+    `n_stops_on_time += 1` (`rewards.py:612`) leaves the loop over stations.
 
 ### 3.11 PR sequence
 
@@ -531,7 +537,7 @@ trajectories, observations or distance maps where the impact is "none"), and get
 | P12 | Malfunction fast path behind a flag | rng |
 | P13 | Trajectories: snapshot interval, observation reuse, typed info | api / format |
 | P13b | Peripheral: Redis pipelining, lazy `matplotlib` import, gym flattening into a preallocated array | none |
-| P14 | Bug fixes 3, 4 and 6–13, one PR each (6–8 and 10 are also milestone M0a) | obs / api |
+| P14 | Bug fixes 3, 4 and 6–15, one PR each (6–8, 10 and 14 are also milestone M0a) | obs / api |
 | P15 | CI profiling covers the defaults, observation builders, load/clone and L-size scenarios; today only config b at M is profiled | — |
 
 The "none" PRs are also checked against the existing regression corpus: `benchmarks/benchmark_episodes.py`, 113
@@ -795,7 +801,7 @@ Each milestone is one PR of under 1000 added lines (generated data excluded), ex
 
 | # | milestone | acceptance criterion |
 |---|---|---|
-| M0a | Python: deterministic order where a set's iteration order changes results (bug 10, #15); fix bugs 6–8 (§3.10) | failing tests first; regression corpus unchanged or updated knowingly |
+| M0a | Python: deterministic order where a set's iteration order changes results (bugs 10 and 14); fix bugs 6–8 (§3.10) | failing tests first; regression corpus unchanged or updated knowingly |
 | M0b | Python: JSON state schema v1 (§4.2) | pickle ↔ JSON round trip on every committed fixture |
 | M0c | Python: `flatland-trace/1` exporter | re-running it gives byte-identical output |
 | M1 | `julia/Flatland` scaffold, `julia.yml`, Aqua/JET/ExplicitImports/format/docs | CI green |
