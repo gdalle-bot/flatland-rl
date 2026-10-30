@@ -71,21 +71,18 @@ class AgentSourceTargetDistanceMap(
         self.agents_previous_computation = self.agents
         self.distance_map = self._new_distance_map(len(agents))
         distance_map_walker = DistanceMapWalker(self)
-        computed_targets = []
+        # (valid targets in the order _valid_targets lists them) -> first agent with exactly these targets
+        first_agent_with_targets: Dict[tuple, int] = {}
         for i, agent in enumerate(agents):
             targets = self._valid_targets(agent, rail)
-            if targets not in computed_targets:
-                reachable_entry_points = distance_map_walker._distance_map_walker(rail, targets)
-                for entry_point in reachable_entry_points:
-                    new_distance = min(
-                        (self._get_distance(entry_point, target_entry_point) for target_entry_point in targets),
-                        default=math.inf
-                    )
+            key = tuple(targets)
+            if key not in first_agent_with_targets:
+                first_agent_with_targets[key] = i
+                for entry_point, new_distance in distance_map_walker._distance_map_walker(rail, targets).items():
                     self._set_geometric_distance(entry_point, i, new_distance)
             else:
                 # just copy the distance map from other agent with same target (performance)
-                self._copy_agent_distance(i, computed_targets.index(targets))
-            computed_targets.append(targets)
+                self._copy_agent_distance(i, first_agent_with_targets[key])
 
     def _new_distance_map(self, num_agents: int) -> DistanceMapT:
         raise NotImplementedError()

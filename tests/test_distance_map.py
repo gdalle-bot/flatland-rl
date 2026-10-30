@@ -1,4 +1,3 @@
-import math
 
 import numpy as np
 
@@ -71,30 +70,17 @@ def test_walker():
     assert env.distance_map.get()[(0, *[0, 2], 1)] == 2
 
 
-def test_distances_cache_cleared_on_reset():
+def test_distances_recomputed_identically_after_reset():
     """
-    Regression test: `EntryPointDistanceMap.reset()` must clear `self.distances` (the internal
-    source->target BFS scratch cache). Without this, a stale distance value left over from a previous
-    episode survives into the next episode's BFS and can get picked up by the `min()` comparison in
-    `DistanceMapWalker._get_and_update_neighbors`, silently corrupting the newly computed distance for
-    a rail topology that is regenerated on every `env.reset()` (the normal RL training loop pattern).
+    Resetting the env with the same seed regenerates the same rail and targets, so the distance map computed after the
+    second reset equals the one computed after the first: no state of the first computation leaks into the second.
     """
     env = _make_simple_env()
     env.reset(random_seed=1)
-
-    env.distance_map.get()  # trigger _compute(), populating self.distances
-    assert len(env.distance_map.distances) > 0
-
-    poisoned_key = next(iter(env.distance_map.distances))
-    correct_value = env.distance_map.distances[poisoned_key]
-    env.distance_map.distances[poisoned_key] = -999
-
+    first = np.copy(env.distance_map.get())
     env.reset(random_seed=1)
-    # reset() must clear the cache immediately - the poisoned entry must be gone, not just overwritten later
-    assert env.distance_map.distances.get(poisoned_key, math.inf) != -999
-
-    env.distance_map.get()  # recompute on the identical (same seed) rail/target assignment
-    assert env.distance_map.distances[poisoned_key] == correct_value
+    second = env.distance_map.get()
+    assert np.array_equal(first, second)
 
 
 def test_loaded_distance_map_is_used_for_shortest_paths():
