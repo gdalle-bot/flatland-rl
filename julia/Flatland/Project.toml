@@ -1,0 +1,7 @@
+name = "Flatland"
+uuid = "bf95c41c-5acb-4adb-a9da-d7e97402d07e"
+version = "0.1.0-DEV"
+authors = ["Guillaume Dalle", "Chun-Tso Tsai"]
+
+[compat]
+julia = "1.10"
