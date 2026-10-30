@@ -121,12 +121,14 @@ a node-id string for graph.
   returns `(position, direction % 2)` so the two crossing axes count as distinct resources. Graph's
   `GraphResourceMap` is identity on the node id.
 - **Distance-map subsystem** (`core/entry_point_distance_map.py`, `core/distance_map.py`,
-  `core/distance_map_walker.py`) — `EntryPointDistanceMap` (agent-agnostic, keyed by
-  `(source_config, target_config)`) → `AgentSourceTargetDistanceMap` (agent-handle-aware, shared template-method
-  `_compute()`) → concrete `DistanceMap` (grid, numpy array) / `GraphDistanceMap` (graph, nested dict).
-  `DistanceMapWalker` does the backward BFS that fills it in, one independent walk per target entry point
-  (a shared visited set across targets silently breaks on cyclic/looped layouts). `RailEnv` keeps one
-  `distance_map` instance alive across `reset()` calls rather than reconstructing it per episode.
+  `core/distance_map_walker.py`) — `EntryPointDistanceMap` (agent-agnostic: the agents and the rail) →
+  `AgentSourceTargetDistanceMap` (agent-handle-aware, shared template-method `_compute()`) → concrete `DistanceMap`
+  (grid, numpy array) / `GraphDistanceMap` (graph, nested dict). `DistanceMapWalker` fills it in with one backward
+  BFS per distinct set of targets, started from all of them at distance 0, so every entry point gets its distance to
+  the nearest target; agents with the same targets copy the first one's distances. Shortest paths memoize their next
+  hops per distance row, so distances change only through `set()`, `reset()` or a recomputation, never by writing
+  into the array `get()` returns. `RailEnv` keeps one `distance_map` instance alive across `reset()` calls rather
+  than reconstructing it per episode.
 
 ### `flatland/envs/` — env control flow
 

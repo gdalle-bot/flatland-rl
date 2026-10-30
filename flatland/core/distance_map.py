@@ -1,6 +1,6 @@
 import math
 from fractions import Fraction
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from flatland.core.entry_point_distance_map import (
     EntryPointDistanceMap,
@@ -116,24 +116,21 @@ class AgentSourceTargetDistanceMap(
         self._row_key_of = {}
         self._clear_shortest_path_memo()
         distance_map_walker = DistanceMapWalker(self)
-        computed_targets = []
+        # valid targets -> first agent with these targets; agents with the same targets copy its distances (the
+        # distances do not depend on the order or the repetition of targets)
+        first_agent_with_targets: Dict[FrozenSet[EntryPointT], int] = {}
         for i, agent in enumerate(agents):
             targets = self._valid_targets(agent, rail)
-            if targets not in computed_targets:
-                reachable_entry_points = distance_map_walker._distance_map_walker(rail, targets)
-                for entry_point in reachable_entry_points:
-                    new_distance = min(
-                        (self._get_distance(entry_point, target_entry_point) for target_entry_point in targets),
-                        default=math.inf
-                    )
+            key = frozenset(targets)
+            if key not in first_agent_with_targets:
+                first_agent_with_targets[key] = i
+                for entry_point, new_distance in distance_map_walker._distance_map_walker(rail, targets).items():
                     self._set_geometric_distance(entry_point, i, new_distance)
                 self._row_key_of[i] = i
             else:
-                # just copy the distance map from other agent with same target (performance)
-                source = computed_targets.index(targets)
+                source = first_agent_with_targets[key]
                 self._copy_agent_distance(i, source)
-                self._row_key_of[i] = self._row_key_of[source]
-            computed_targets.append(targets)
+                self._row_key_of[i] = source
 
     def _new_distance_map(self, num_agents: int) -> DistanceMapT:
         raise NotImplementedError()

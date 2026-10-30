@@ -309,9 +309,11 @@ class RailEnvPersister(object):
         if _elapsed_steps is not None:
             env._elapsed_steps = _elapsed_steps
 
-        env.distance_map.distance_map = env_dict.get('distance_map', None)
+        # Recompute for the loaded agents and rail (a saved distance map is not used). get() computes it once and
+        # marks it current, so the next get() does not compute it again.
+        env.distance_map.distance_map = None
         env.distance_map.reset(env.agents, env.rail)
-        env.distance_map._compute(env.agents, env.rail)
+        env.distance_map.get()
 
         random_seed = env.random_seed = env_dict.get("random_seed", None)
         if random_seed is not None:
