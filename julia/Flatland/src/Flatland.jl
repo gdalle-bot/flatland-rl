@@ -8,4 +8,12 @@ exactly, and at simulating them much faster. See `REVAMP.md` at the root of the 
 """
 module Flatland
 
+include("actions.jl")
+include("grid.jl")
+include("network.jl")
+
+export RailEnvAction
+export GridRail, is_valid_entry_point, check_action, apply_action
+export EntryPointNetwork, entry_point_index, entry_point, next_entry_point, successors
+
 end
