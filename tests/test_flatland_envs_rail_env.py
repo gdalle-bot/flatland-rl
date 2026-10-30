@@ -2732,3 +2732,23 @@ def test_railenvwrapper_matches_unwrapped_control_flow(seed):
             break
 
     assert any_real_state_diverged_from_derived_fallback
+
+
+def test_default_observation_builder_is_not_shared_between_envs():
+    """
+    Two envs on 30x30 sparse rails with different seeds, both built without an explicit observation builder.
+    - Setup: reset the first env, then the second.
+    - Each env has its own `GlobalObsForRailEnv`, still bound to that env after the other one was reset: the first env's
+      observations are built from its own rail, not from the second env's.
+    """
+    env1 = RailEnv(width=30, height=30, number_of_agents=2, random_seed=1)
+    env2 = RailEnv(width=30, height=30, number_of_agents=2, random_seed=2)
+    obs1, _ = env1.reset(random_seed=1)
+    env2.reset(random_seed=2)
+    assert isinstance(env1.obs_builder, GlobalObsForRailEnv)
+    assert isinstance(env2.obs_builder, GlobalObsForRailEnv)
+    assert env1.obs_builder is not env2.obs_builder
+    assert env1.obs_builder.env is env1
+    assert env2.obs_builder.env is env2
+    obs1_again, _, _, _ = env1.step({})
+    assert np.array_equal(obs1_again[0][0], obs1[0][0])  # rail layer of env1, unchanged by env2's reset
