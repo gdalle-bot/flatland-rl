@@ -476,16 +476,14 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
         this episode's initial) position/speed have already settled - see `derived_state()`'s own
         docstring for the general safe/unsafe timing distinction.
         """
-        info_dict = {
-            'action_required': {i: RailEnv.action_required(agent.derived_state(self._elapsed_steps), agent.speed_counter.is_cell_exit())
-                                for i, agent in enumerate(self.agents)},
-            'malfunction': {
-                i: agent.malfunction_handler.malfunction_down_counter for i, agent in enumerate(self.agents)
-            },
-            'speed': {i: agent.speed_counter.speed for i, agent in enumerate(self.agents)},
-            'state': {i: agent.derived_state(self._elapsed_steps) for i, agent in enumerate(self.agents)}
-        }
-        return info_dict
+        action_required, malfunction, speed, state = {}, {}, {}, {}
+        for i, agent in enumerate(self.agents):
+            agent_state = agent.derived_state(self._elapsed_steps)
+            action_required[i] = RailEnv.action_required(agent_state, agent.speed_counter.is_cell_exit())
+            malfunction[i] = agent.malfunction_handler.malfunction_down_counter
+            speed[i] = agent.speed_counter.speed
+            state[i] = agent_state
+        return {'action_required': action_required, 'malfunction': malfunction, 'speed': speed, 'state': state}
 
     def end_of_episode_update(self, have_all_agents_ended):
         """
@@ -626,7 +624,6 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
 
         # (3) STATE TRANSITION SIGNALS
         in_malfunction = agent.malfunction_handler.in_malfunction
-        state = agent.state
 
         # (4) CANDIDATE ENTRY POINT: action validity - need both by speed update (5) and position update (6) below
         # mid cell or valid transition (only invalid actions are non-L/R on symmetric switches) -
@@ -740,7 +737,7 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
             if not valid_position_direction:
                 infra = self._infrastructure_representation(agent.current_entry_point)
                 warnings.warn(f"{candidate_entry_point} not valid on the grid."
-                              f" Coming from {agent.current_entry_point if state.is_on_map_state() else initial_entry_point} with action {action}"
+                              f" Coming from {agent.current_entry_point if agent.state.is_on_map_state() else initial_entry_point} with action {action}"
                               f" and action valid {action_valid}. {infra}")
             # fails if initial position has invalid direction or if the grid is not closed
             # assert valid_position_direction
