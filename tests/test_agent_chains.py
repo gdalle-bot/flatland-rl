@@ -1,6 +1,7 @@
 from typing import Tuple, List
 
 import networkx as nx
+import numpy as np
 from matplotlib import pyplot as plt
 
 from flatland.envs.agent_chains import MotionCheckLegacy, MotionCheck
@@ -433,3 +434,140 @@ def test_edge_case():
     mc.find_conflicts()
     assert mc.stopped == {2, 3, 5, 6}
     assert mc.deadlocked == {3, 5}
+
+
+class _SlicingMotionCheck:
+    """
+    Reference `MotionCheck` that pops the head of its conflict queue by re-slicing a list. A standalone copy, so that
+    changes to `MotionCheck` are compared against fixed behaviour.
+    """
+
+    def __init__(self):
+        self.agents = {}
+        self.reverse_target = {}
+        self.stopped = set()
+        self.deadlocked = set()
+        self.hold_resource = set()
+        self.no_resource = set()
+
+    def add_agent(self, i, r1, r2):
+        if r1 is None:
+            r1 = (None, i)
+        if r2 is None:
+            self.no_resource.add(i)
+            r2 = (None, i)
+        if r1 == r2:
+            self.hold_resource.add(i)
+        self.agents[i] = (r1, r2)
+        if r2 not in self.reverse_target:
+            self.reverse_target[r2] = [i]
+        else:
+            self.reverse_target[r2].append(i)
+
+    def find_conflicts(self):
+        target_conflicts = self._construct_graph()
+        for a in self.deadlocked:
+            a_pos, a_target = self.agents[a]
+            self.agents[a] = (a_pos, a_pos)
+            target_conflicts = self._stop_and_update_target_conflicts(target_conflicts, a, a_pos, a_target)
+        self._fix_conflicts(target_conflicts)
+
+    def _construct_graph(self):
+        target_conflicts = []
+        for iAg, (pos, target) in self.agents.items():
+            if pos in self.reverse_target:
+                for a2 in self.reverse_target[pos]:
+                    if iAg >= a2:
+                        continue
+                    a2pos, a2_target = self.agents[a2]
+                    if pos == a2_target and target == a2pos:
+                        self.stopped.add(iAg)
+                        self.stopped.add(a2)
+                        self.deadlocked.add(iAg)
+                        self.deadlocked.add(a2)
+            for a2 in self.reverse_target[target]:
+                if iAg >= a2:
+                    continue
+                target_conflicts.append((iAg, a2))
+            if pos == target:
+                self.stopped.add(iAg)
+        return target_conflicts
+
+    def _fix_conflicts(self, target_conflicts):
+        while len(target_conflicts) > 0:
+            u, v = target_conflicts[0]
+            u_pos, u_target = self.agents[u]
+            v_pos, v_target = self.agents[v]
+            if v_pos == v_target:
+                target_conflicts = self._stop_and_update_target_conflicts(target_conflicts, u, u_pos, u_target)
+            elif u_target == v_target:
+                target_conflicts = self._stop_and_update_target_conflicts(target_conflicts, v, v_pos, v_target)
+            target_conflicts = target_conflicts[1:]
+
+    def _stop_and_update_target_conflicts(self, target_conflicts, v, v_pos, v_target):
+        self.agents[v] = (v_pos, v_pos)
+        self.stopped.add(v)
+        if v_pos in self.reverse_target:
+            target_conflicts += [(v, other) if v < other else (other, v) for other in self.reverse_target[v_pos] if other != v]
+            self.reverse_target[v_pos].append(v)
+        else:
+            self.reverse_target[v_pos] = [v]
+        self.reverse_target[v_target].remove(v)
+        return target_conflicts
+
+    def check_resource(self, i):
+        return i in self.hold_resource or i in self.no_resource or i not in self.stopped
+
+
+def _random_motion_check_inputs(rng):
+    """Random agents on up to 8 cells. As in the env, each cell is held by at most one agent."""
+    n_agents = int(rng.integers(1, 13))
+    cells = [(int(r), int(c)) for r, c in rng.integers(0, 4, size=(int(rng.integers(2, 9)), 2))]
+    occupied = set()
+    inputs = []
+    for i in range(n_agents):
+        r1 = None
+        if rng.random() < 0.8:
+            r1 = cells[int(rng.integers(len(cells)))]
+            if r1 in occupied:
+                r1 = None
+            else:
+                occupied.add(r1)
+        u = rng.random()
+        r2 = r1 if u < 0.3 else (None if u < 0.4 else cells[int(rng.integers(len(cells)))])
+        inputs.append((i, r1, r2))
+    return inputs
+
+
+def test_motion_check_matches_slicing_queue():
+    """
+    5000 random configurations of up to 12 agents, each holding its own cell or off the map and asking for its own cell,
+    another cell or none, on up to 8 cells (so that swaps, chains and same-target conflicts are frequent). For each,
+    the stopped and deadlocked agents and the movement decision of every agent equal those of a reference that
+    processes its conflict queue by re-slicing a list.
+    """
+    rng = np.random.default_rng(0)
+    for _ in range(5000):
+        inputs = _random_motion_check_inputs(rng)
+        new, old = MotionCheck(), _SlicingMotionCheck()
+        for mc in (new, old):
+            for i, r1, r2 in inputs:
+                mc.add_agent(i, r1, r2)
+            mc.find_conflicts()
+        assert new.stopped == old.stopped, inputs
+        assert new.deadlocked == old.deadlocked, inputs
+        assert [new.check_resource(i) for i, _, _ in inputs] == [old.check_resource(i) for i, _, _ in inputs], inputs
+
+
+def test_motion_check_many_agents_queued_for_one_cell():
+    """
+    200 agents, each on its own cell, all ask for the same free cell. Only agent 0 (lowest handle) may move; all
+    others are stopped, and none is deadlocked.
+    """
+    mc = MotionCheck()
+    for i in range(200):
+        mc.add_agent(i, (i + 1, 0), (0, 0))
+    mc.find_conflicts()
+    assert [i for i in range(200) if mc.check_resource(i)] == [0]
+    assert mc.stopped == set(range(1, 200))
+    assert mc.deadlocked == set()
