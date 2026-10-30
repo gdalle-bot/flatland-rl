@@ -94,10 +94,9 @@ end
     next_entry_point(net, i, action)
 
 Index of the entry point reached from entry point `i` with `action`, `0` if there is none. Throws a `BoundsError` if
-`i` is not in `1:num_entry_points(net)`, unless called with `@inbounds`.
+`i` is not in `1:num_entry_points(net)`.
 """
-Base.@propagate_inbounds next_entry_point(net::EntryPointNetwork, i::Integer, action::RailEnvAction) =
-    net.next[Int(action) + 1, i]
+next_entry_point(net::EntryPointNetwork, i::Integer, action::RailEnvAction) = net.next[Int(action) + 1, i]
 
 """
     successors(net, i)

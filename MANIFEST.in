@@ -1,0 +1,2 @@
+# the Julia package in julia/ is not part of the Python package
+prune julia
