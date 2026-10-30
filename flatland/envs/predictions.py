@@ -141,38 +141,34 @@ class ShortestPathPredictorForRailEnv(PredictionBuilder[RailEnv, Dict[int, np.nd
             # assume constant max_speed
             agent_speed = agent.speed_counter.max_speed
             times_per_cell = int(np.reciprocal(agent_speed))
-            prediction = np.zeros(shape=(self.max_depth + 1, 5))
-            prediction[0] = [0, *agent_virtual_position, agent_virtual_direction, 0]
+            rows = [[0, *agent_virtual_position, agent_virtual_direction, 0]]
 
-            shortest_path = shortest_paths[agent.handle]
-
-            # if there is a shortest path, remove the initial position
-            if shortest_path:
-                shortest_path = shortest_path[1:]
+            shortest_path = shortest_paths[agent.handle] or []
+            # if there is a shortest path, skip the initial position
+            next_waypoint = 1 if shortest_path else 0
 
             new_direction = agent_virtual_direction
             new_position = agent_virtual_position
             visited = OrderedSet()
             for index in range(1, self.max_depth + 1):
                 # if we're at the target, stop moving until max_depth is reached
-                if new_position == agent_target or not shortest_path:
-                    prediction[index] = [index, *new_position, new_direction, RailEnvActions.STOP_MOVING.value]
+                if new_position == agent_target or next_waypoint >= len(shortest_path):
+                    rows.append([index, *new_position, new_direction, RailEnvActions.STOP_MOVING.value])
                     cur = agent.current_entry_point
                     visited.add((*new_position, cur[1] if cur is not None else None))
                     continue
 
                 if index % times_per_cell == 0:
-                    new_position = shortest_path[0].position
-                    new_direction = shortest_path[0].direction
-
-                    shortest_path = shortest_path[1:]
+                    new_position = shortest_path[next_waypoint].position
+                    new_direction = shortest_path[next_waypoint].direction
+                    next_waypoint += 1
 
                 # prediction is ready
-                prediction[index] = [index, *new_position, new_direction, 0]
+                rows.append([index, *new_position, new_direction, 0])
                 visited.add((*new_position, new_direction))
 
             # TODO: very bady side effects for visualization only: hand the dev_pred_dict back instead of setting on env!
             self.env.dev_pred_dict[agent.handle] = visited
-            prediction_dict[agent.handle] = prediction
+            prediction_dict[agent.handle] = np.array(rows, dtype=float)
 
         return prediction_dict
