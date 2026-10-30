@@ -83,6 +83,12 @@ version or OS gets no matching wheel at all. Building from source sidesteps that
 Python's standard packaging tools, and failing outright in environments that categorically refuse to build from
 source (e.g. `pip install --only-binary=:all:`, some locked-down/air-gapped setups).
 
+### Debugging: step pre/postcondition checks
+
+`RailEnv.step()` can verify every agent's update against its pre- and postconditions. This is off by default because
+it slows down every step. Turn it on with `RailEnv(..., check_step_pre_post_conditions=True)`, or for a whole script or
+notebook with the environment variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS=1`.
+
 ### Known issue: architecture-mismatched Cython extensions on Apple Silicon
 
 **Symptoms:** on some x86_64-conda-on-Apple-Silicon setups (Python running under Rosetta 2), importing
