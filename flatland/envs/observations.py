@@ -257,8 +257,6 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
         agent_target = next(iter(agent.targets))[0]
         distance_map_handle = self.env.distance_map.get()[handle]
 
-        # assume constant max_speed
-        time_per_cell = 1.0 / agent.speed_counter.max_speed
         own_target_encountered = np.inf
         other_agent_encountered = np.inf
         other_target_encountered = np.inf
@@ -301,7 +299,7 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
 
                 # Check number of possible transitions for agent and total number of transitions in cell (type)
             cell_transitions = self.env.rail.get_transitions((position, direction))
-            full_transitions = int(self.env.rail.get_full_transitions(*position))
+            full_transitions = self.env.rail.get_full_transitions(*position)
             total_transitions = full_transitions.bit_count()
             crossing_found = full_transitions == 0b1000010000100001
 
@@ -460,9 +458,6 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
 
         for direction in self.tree_explored_actions_char:
             self.print_subtree(node.childs[direction], direction, indent + "\t")
-
-    def _reverse_dir(self, direction):
-        return int((direction + 2) % 4)
 
 
 class GlobalObsForRailEnv(ObservationBuilder["RailEnv", Tuple[np.ndarray, np.ndarray, np.ndarray]]):
