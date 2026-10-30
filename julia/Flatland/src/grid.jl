@@ -18,6 +18,8 @@ level-free crossings, where the two crossing tracks are distinct resources.
 # Constructor
 
     GridRail(transitions::AbstractMatrix, level_free=())
+
+The constructor copies `transitions`.
 """
 struct GridRail
     transitions::Matrix{UInt16}
@@ -25,13 +27,13 @@ struct GridRail
 end
 
 GridRail(transitions::AbstractMatrix, level_free = ()) =
-    GridRail(convert(Matrix{UInt16}, transitions), Set{Tuple{Int, Int}}(level_free))
+    GridRail(Matrix{UInt16}(transitions), Set{Tuple{Int, Int}}(level_free))
 
 height(rail::GridRail) = size(rail.transitions, 1)
 width(rail::GridRail) = size(rail.transitions, 2)
 
 in_bounds(rail::GridRail, r::Integer, c::Integer) = 0 <= r < height(rail) && 0 <= c < width(rail)
-cell_code(rail::GridRail, r::Integer, c::Integer) = @inbounds rail.transitions[r + 1, c + 1]
+cell_code(rail::GridRail, r::Integer, c::Integer) = rail.transitions[r + 1, c + 1]
 
 # 4-bit mask of the exit directions allowed when heading `orientation` in a cell: bit `3 - d` for exit direction `d`
 transition_bits(code::UInt16, orientation::Integer) = (code >> (4 * (3 - orientation))) & 0x000f
@@ -64,8 +66,11 @@ action_valid)`:
 - `MOVE_LEFT`/`MOVE_RIGHT` fall back to `MOVE_FORWARD` (with `transition_valid = false`) where the turn is impossible;
 - any action is invalid (`action_valid = false`, `STOP_MOVING`) where neither it nor going forward is possible, e.g.
   `MOVE_FORWARD` facing a symmetric switch.
+
+Throws an `ArgumentError` if `direction` is not in `0:3`.
 """
 function check_action(action::RailEnvAction, code::UInt16, direction::Integer)
+    0 <= direction <= 3 || throw(ArgumentError("direction must be in 0:3, got $direction"))
     direction = Int(direction)
     if count_transitions(code, direction) == 1
         # dead-end, straight or curved rail: the only exit
@@ -101,7 +106,8 @@ end
     apply_action(rail, action, r, c, d)
 
 Entry point `(r′, c′, d′)` an agent at entry point `(r, c, d)` moves to with `action`, or `nothing` if the action is
-invalid there or leads off the rail, as `RailGridTransitionMap.apply_action_independent` in Python.
+invalid there or leads off the rail, as `RailGridTransitionMap.apply_action_independent` in Python. `DO_NOTHING` and
+`STOP_MOVING` lead where `MOVE_FORWARD` does. Throws a `BoundsError` if `(r, c)` is outside the grid.
 """
 function apply_action(rail::GridRail, action::RailEnvAction, r::Integer, c::Integer, d::Integer)
     new_direction, _, _, action_valid = check_action(action, cell_code(rail, r, c), d)

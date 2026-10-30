@@ -1,12 +1,15 @@
 name: Julia
 
-# CI for the Julia package in julia/Flatland (see REVAMP.md). Runs only when the Julia package or this workflow changes.
+# CI for the Julia package in julia/Flatland (see REVAMP.md). Runs only when the Julia package, the Python scripts that
+# export its conformance data, or this workflow change.
 on:
     push:
-        branches: [ "main" ]
-        paths: [ "julia/**", ".github/workflows/julia.yml" ]
+        branches: [ "main", "revamp" ]
+        # tags of the Julia package, for the docs of each release (path filters do not apply to tags)
+        tags: [ "Flatland-v*" ]
+        paths: [ "julia/**", "tests/conformance/**", ".github/workflows/julia.yml" ]
     pull_request:
-        paths: [ "julia/**", ".github/workflows/julia.yml" ]
+        paths: [ "julia/**", "tests/conformance/**", ".github/workflows/julia.yml" ]
     workflow_dispatch:
 
 concurrency:
@@ -68,15 +71,25 @@ jobs:
             -   uses: julia-actions/setup-julia@v3
                 with:
                     version: lts
+            -   uses: julia-actions/cache@v3
+            # resolve the package and its test environment at the lower bounds of their compat entries, and fail if a
+            # dependency resolves above its lower bound
             -   uses: julia-actions/julia-downgrade-compat@v2
                 with:
-                    projects: julia/Flatland
-            -   uses: julia-actions/julia-buildpkg@v1
-                with:
-                    project: julia/Flatland
-            -   uses: julia-actions/julia-runtest@v1
-                with:
-                    project: julia/Flatland
+                    projects: julia/Flatland,julia/Flatland/test
+                    mode: forcedeps
+                    skip: Test
+                    julia_version: lts
+            # Pkg.test re-resolves split test environments before Julia 1.12, so run the tests from the resolved one
+            -   name: Run the tests
+                run: |
+                    julia --project=julia/Flatland/test --color=yes -e '
+                      import Pkg
+                      Pkg.develop(Pkg.PackageSpec(path="julia/Flatland"))
+                      Pkg.instantiate()
+                      Pkg.status(; mode=Pkg.PKGMODE_MANIFEST)
+                      include("julia/Flatland/test/runtests.jl")
+                    '
 
     format:
         name: Format (Runic)
@@ -92,7 +105,7 @@ jobs:
                     version: "1"
             -   uses: julia-actions/cache@v3
             -   name: Install Runic
-                run: julia --project=@runic --color=yes -e 'using Pkg; Pkg.add("Runic")'
+                run: julia --project=@runic --color=yes -e 'using Pkg; Pkg.add(name="Runic", version="1")'
             -   name: Check formatting
                 run: julia --project=@runic --color=yes -e 'using Runic; exit(Runic.main(["--check", "--diff", "julia"]))'
 
@@ -111,7 +124,8 @@ jobs:
                     version: "1"
             -   uses: julia-actions/cache@v3
             -   name: Install dependencies
-                run: julia --project=julia/Flatland/docs --color=yes -e 'using Pkg; Pkg.develop(PackageSpec(path="julia/Flatland")); Pkg.instantiate()'
+                # docs/Project.toml points to the package with [sources]
+                run: julia --project=julia/Flatland/docs --color=yes -e 'using Pkg; Pkg.instantiate()'
             -   name: Build and deploy
                 env:
                     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

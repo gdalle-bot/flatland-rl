@@ -14,9 +14,9 @@ include("network.jl")
 include("speed.jl")
 include("candidates.jl")
 
-export RailEnvAction
+export RailEnvAction, DO_NOTHING, MOVE_LEFT, MOVE_FORWARD, MOVE_RIGHT, STOP_MOVING
 export GridRail, is_valid_entry_point, check_action, apply_action
-export EntryPointNetwork, entry_point_index, entry_point, next_entry_point, successors
+export EntryPointNetwork, entry_point_index, entry_point, num_entry_points, num_resources, next_entry_point, successors
 export SpeedProfile, to_ticks, from_ticks
 export PreStepAgent, Candidate, candidate
 
