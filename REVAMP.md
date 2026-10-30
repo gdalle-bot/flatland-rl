@@ -441,8 +441,9 @@ reformulation, which the next paragraph rules out.
 the current order lets a move. Processing the pairs in the order (a, c), (b, c), (a, b) stops all three, because a
 stopped agent then blocks the others. So any rewrite must keep the exact order: pairs built in handle order, each
 resource's agents in insertion order, FIFO with appends. It must also be accepted by differential fuzzing against
-the current implementation. Iteration over the `deadlocked` set (`:325`) follows CPython's set order; `sorted()`
-there is cheap insurance. Impact: none.
+the current implementation. Iteration over the `deadlocked` set (`:325`) follows CPython's set order, but a
+differential search over 400,000 random configurations found no case where that order changes which agents move:
+every agent that targets a deadlocked agent's cell is stopped whatever the order. Impact: none.
 
 ### 3.8 Malfunctions
 
@@ -530,7 +531,7 @@ trajectories, observations or distance maps where the impact is "none"), and get
 | P12 | Malfunction fast path behind a flag | rng |
 | P13 | Trajectories: snapshot interval, observation reuse, typed info | api / format |
 | P13b | Peripheral: Redis pipelining, lazy `matplotlib` import, gym flattening into a preallocated array | none |
-| P14 | Bug fixes 3, 4 and 6–13, one PR each (6–8 and the `sorted()` of 10 are also milestone M0a) | obs / api |
+| P14 | Bug fixes 3, 4 and 6–13, one PR each (6–8 and 10 are also milestone M0a) | obs / api |
 | P15 | CI profiling covers the defaults, observation builders, load/clone and L-size scenarios; today only config b at M is profiled | — |
 
 The "none" PRs are also checked against the existing regression corpus: `benchmarks/benchmark_episodes.py`, 113
@@ -794,7 +795,7 @@ Each milestone is one PR of under 1000 added lines (generated data excluded), ex
 
 | # | milestone | acceptance criterion |
 |---|---|---|
-| M0a | Python: `sorted()` over order-dependent set iterations; fix bugs 6–8 (§3.10) | failing tests first; regression corpus unchanged or updated knowingly |
+| M0a | Python: deterministic order where a set's iteration order changes results (bug 10, #15); fix bugs 6–8 (§3.10) | failing tests first; regression corpus unchanged or updated knowingly |
 | M0b | Python: JSON state schema v1 (§4.2) | pickle ↔ JSON round trip on every committed fixture |
 | M0c | Python: `flatland-trace/1` exporter | re-running it gives byte-identical output |
 | M1 | `julia/Flatland` scaffold, `julia.yml`, Aqua/JET/ExplicitImports/format/docs | CI green |
