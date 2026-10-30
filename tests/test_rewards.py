@@ -1030,6 +1030,29 @@ def test_multicell_station_not_served_when_only_rolled_through():
     assert d[DefaultPenalties.INTERMEDIATE_EARLY_DEPARTURE.value] == 0
 
 
+def test_multicell_station_tie_scored_on_first_cell_of_the_line():
+    """
+    An agent whose line lists the two cells of an intermediate station as A=(2,2) then B=(2,3) halts at both, with the
+    same total penalty at each: latest arrival 11, earliest departure 7, late-arrival factor 0.2, early-departure factor
+    0.5.
+    - Setup: it halts at B at step 3 and leaves it at step 5, 2 steps before its earliest departure (-1.0), then halts at A
+      at step 16, 5 steps late (-1.0).
+    - The tie is scored on A, the first cell of the line: a late-arrival penalty of -1.0 and no early-departure
+      penalty.
+    """
+    rewards, agent, distance_map = _agent_with_two_cell_intermediate_station(latest_arrival_intermediate=11, earliest_departure_intermediate=7)
+    approach, off_station = Waypoint((1, 2), 2), Waypoint((1, 3), 0)
+    _visit(rewards, agent, distance_map, STATION_CELL_B, TrainState.STOPPED, 3, approach)
+    _visit(rewards, agent, distance_map, off_station, TrainState.MOVING, 5, STATION_CELL_B)  # leaves B
+    _visit(rewards, agent, distance_map, STATION_CELL_A, TrainState.STOPPED, 16, off_station)
+    _visit(rewards, agent, distance_map, STATION_CELL_A, TrainState.MOVING, 17, STATION_CELL_A)
+
+    d = rewards.step_reward(agent, None, distance_map, elapsed_steps=25)
+    assert d[DefaultPenalties.INTERMEDIATE_NOT_SERVED.value] == 0
+    assert d[DefaultPenalties.INTERMEDIATE_LATE_ARRIVAL.value] == LATE_ARRIVAL_FACTOR * (11 - 16)
+    assert d[DefaultPenalties.INTERMEDIATE_EARLY_DEPARTURE.value] == 0
+
+
 @pytest.mark.parametrize("revisit_cell,revisit_halts", [
     (STATION_CELL_A, False),  # later roll through the same cell without halting
     (STATION_CELL_B, False),  # later roll through the other cell without halting
