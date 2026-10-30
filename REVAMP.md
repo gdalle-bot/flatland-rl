@@ -19,10 +19,10 @@ Everything below refers to `main` at `51f5621c`. Claims are tagged:
 - **Observation building dominates everything else** [measured]. With 200 agents on a 100×100 grid:
   - the dynamics alone (`step()` without observations) take **3.2 ms per step**;
   - the default `GlobalObsForRailEnv` takes **110–140 ms**;
-  - the canonical RL setup (`TreeObsForRailEnv(3)` + `ShortestPathPredictorForRailEnv(50)`) takes **210 ms**.
+  - the canonical RL setup (`TreeObsForRailEnv(3)` + `ShortestPathPredictorForRailEnv(50)`) takes **210–220 ms**.
 
-  With 500 agents on a 158×158 map, the dynamics fit easily: about 34 s for `reset()` plus a full 3122-step
-  episode. The built-in observation builders do not. With the default builder (0.8–1.15 s per step, from single
+  With 500 agents on a 158×158 map, the dynamics fit easily: about 37 s for `reset()` (6.1 s) plus a full 3122-step
+  episode (30.6 s, of which 2.8 s in the last step). The built-in observation builders do not. With the default builder (0.8–1.15 s per step, from single
   10-step windows), the same episode would take 40–60 minutes [estimate]. That is above the 30-minute per-scenario
   budget of ECML 2026, whose levels go up to 532 agents (on a different, 120×150 map).
 - **The biggest Python wins are not in the dynamics.**
@@ -42,8 +42,8 @@ Everything below refers to `main` at `51f5621c`. Claims are tagged:
   - skipping inactive agents.
 
   A Julia core with struct-of-arrays state should reach two orders of magnitude on the dynamics alone [estimate].
-  End to end, it only pays off once the observation builders are ported too (Amdahl: the dynamics are 2–4% of a
-  step with a built-in observation builder).
+  End to end, it only pays off once the observation builders are ported too (Amdahl: the dynamics are about 1–4% of
+  a step with a built-in observation builder, about 1% at L).
 - **The Julia rewrite is a dynamics-parity port, not a fork.**
   - Python keeps scenario generation and stays the reference implementation.
   - Julia must reproduce Python's trajectories bit for bit, checked on golden traces in CI.
@@ -70,12 +70,13 @@ total time".
 The Flatland 2020 competition report ([arXiv:2103.16511](https://arxiv.org/abs/2103.16511)) gave submissions 8 hours
 in total, "10 minutes per environment for initial planning, then 10 seconds … per timestep", on 4 CPU cores. The
 original Flatland paper ("Flatland-RL : Multi-Agent Reinforcement Learning on Trains",
-[arXiv:2012.05893](https://arxiv.org/abs/2012.05893)) promised "fast experimentation" as
+[arXiv:2012.05893](https://arxiv.org/abs/2012.05893)) promised "faster experimentation" as
 the reason to simplify the physical simulation in the first place.
 
 **Current challenges are larger.** The
 [ECML 2026 levels](https://flatland-association.github.io/flatland-book/challenges/ecml2026/levelconfig.html) go up
-to 532 agents on a single 120×150 map with 28 stations. The [evaluation rules](https://flatland-association.github.io/flatland-book/challenges/ecml2026/eval.html)
+to 532 agents, on a
+[single 120×150 map with 28 stations](https://flatland-association.github.io/flatland-book/challenges/ecml2026.html). The [evaluation rules](https://flatland-association.github.io/flatland-book/challenges/ecml2026/eval.html)
 allow "up to 30 minutes per scenario", 5 hours in total, on 4 CPU cores with 15 GB.
 
 **RL training multiplies the cost.** At 4.6–4.8 steps/s (§2, 200 agents, tree observation), one million environment
@@ -89,12 +90,13 @@ steps take about 60 hours on one core. At the dynamics-only speed (316 steps/s),
 - [#68](https://github.com/flatland-association/flatland-rl/pull/68) moved A* to a heap.
 - A September 2026 series of micro-optimisations (PRs
   [#520](https://github.com/flatland-association/flatland-rl/pull/520) and
-  [#521](https://github.com/flatland-association/flatland-rl/pull/521), landed via
-  [#499](https://github.com/flatland-association/flatland-rl/pull/499)) gained from about 1% to 50% on individual
-  sub-functions (`step_reward` halved).
+  [#521](https://github.com/flatland-association/flatland-rl/pull/521), landed together with
+  [#499](https://github.com/flatland-association/flatland-rl/pull/499) in the stacked merge
+  [#531](https://github.com/flatland-association/flatland-rl/pull/531)) gained about 1% on the whole step and up to 50%
+  on individual sub-functions (`step_reward` halved).
 - Upstream CI's [profiling chart](https://github.com/flatland-association/flatland-rl/pull/550#issuecomment-6495645677)
   (Python 3.13, 200 agents, checks off, no observations) shows that `step` time swung 3× across releases: 1.02 s in
-  v4.1.1, 3.07 s in v4.2.5, 1.26 s on `main`. These are cProfile cumulative times over a 200-step run, not comparable
+  v4.1.1, 3.07 s in v4.2.5, 1.26 s at #550's head (a docs-only change, so `main`'s code). These are cProfile cumulative times over a 200-step run, not comparable
   to §2's per-step wall-clock times. The Cython build of
   [#449](https://github.com/flatland-association/flatland-rl/pull/449) gives 1.25 s, i.e. nothing, because
   `step()` no longer drives the compiled state machine.
@@ -115,17 +117,18 @@ steps take about 60 hours on one core. At the dynamics-only speed (316 steps/s),
 - **The random policy gridlocks.** At M, none of the 200 agents reaches its target, 105 never depart, and at most 95
   are on the map at once. At L, 3 of 500 arrive and 94 never depart. This shapes station queues (MotionCheck),
   tree-observation density and reward bookkeeping; a trained policy's profile may differ.
-- **Repetitions.** S and M/b/d: 5 or 3 repetitions of full episodes, with a coefficient of variation of the
-  per-step mean of 3% (0.7% on a second pass). M/a and M/c: 3 repetitions of 50- and 30-step windows. L: one
-  repetition, and only 10-step windows for L/a and L/c.
+- **Repetitions.** S and M/b/d: 5 or 3 repetitions of full episodes; the first is dropped as warm-up, so the means use
+  4 or 2. The coefficient of variation of the per-step mean is 9.5% for S/b, 3.6% for S/d, 3.0% for M/b (0.7% on a
+  second pass) and 1.4% for M/d, so the ratios at S carry about ±10% of noise. M/a and M/c: 3 repetitions of 50- and
+  30-step windows. L: one repetition, and only 10-step windows for L/a and L/c.
 - Timings are wall-clock between timestamps on the bracketing calls. cProfile was used only for within-phase splits
   and call counts. The driver and analysis scripts are in Appendix A.
 
 | scenario | grid | agents | cities | max episode steps | basis |
 |---|---|---|---|---|---|
-| S | 30×30 | 7 | 2 | 278 | Flatland 3 `Test_00` |
+| S | 30×30 | 7 | 2 | 278 | Flatland 3 rounds 1 and 2 `Test_00` ([configs](https://flatland-association.github.io/flatland-book/challenges/flatland3/envconfig.html)) |
 | M | 100×100 | 200 | 5 | 1656 | upstream CI profiling setup |
-| L | 158×158 | 500 | 41 | 3122 | Flatland 3 `Test_14` geometry, about the ECML 2026 agent count (not its map) |
+| L | 158×158 | 500 | 41 | 3122 | Flatland 3 `Test_14` geometry, with 500 agents instead of its 425: about the ECML 2026 agent count (not its map) |
 
 | config | observation builder | `check_step_pre_post_conditions` |
 |---|---|---|
@@ -149,7 +152,7 @@ Per-step mean over steady-state steps; the first and last steps are reported sep
 | S/c | 3.6 | 280 | tree obs 76%, predictor 19% |
 | M/b | 3.2 | 316 | collect 38%, distribute 28%, MotionCheck 13%, info dict 10%, snapshot 5% |
 | M/d | 4.7 | 211 | checks 27% |
-| M/a | 109 → 142 | 9 → 7 | global obs 97% |
+| M/a | 109 → 142 | 9 → 7 | global obs 96–97% |
 | M/c | 217 → 211 | 5 | tree obs 80–84%, predictor 15–18% |
 | L/b | 8.9 | 112 | collect 40%, distribute 33%, info dict 10%, snapshot 7%, MotionCheck 5% |
 | L/a | 790 → 1 150 | 1 | global obs 99% |
@@ -181,7 +184,7 @@ Run in-process, best of several repetitions; `benchmarks/revamp/micro.py` (Appen
 
 | what | result |
 |---|---|
-| tree obs at M, step 1240 (95 agents on map): `get_many` with the dead conflict block (§3.1) vs with its `fast_delete` stubbed out | **182.5 → 113.5 ms (−38%) predictor included, 156 → 87 ms (−44%) without the predictor's 26 ms**. Lower bounds: the block's other work still ran. Observations identical (`repr` equal); 24 930 `fast_delete` list copies, 0 `fast_where` calls |
+| tree obs at M, step 1240 (95 agents on map): `get_many` with the dead conflict block (§3.1) vs with its `fast_delete` stubbed out | **182.5 → 113.5 ms (−38%) predictor included, 156 → 87 ms (−44%) without the predictor's 26 ms** (best of several calls at step 1240; §2.1's predictor share is a mean over the late window). Lower bounds: the block's other work still ran. Observations identical (`repr` equal); 24 930 `fast_delete` list copies, 0 `fast_where` calls |
 | global obs at M: the six `isfinite`/`isnan` asserts | 0.12 ms per agent, i.e. 24 ms of the 145 ms the builder needs per step |
 | speed-counter arithmetic per agent-step (cell exit, acceleration, both distance formulas, the entry test) | `Fraction` with the existing `lru_cache`s: 6.8 µs; `Fraction` uncached: 6.7 µs; **integer ticks: 0.18 µs (38×)** |
 | `Fraction + Fraction` vs `int + int` / `hash(Fraction)` | 479 ns vs 18 ns / 179 ns |
@@ -189,7 +192,7 @@ Run in-process, best of several repetitions; `benchmarks/revamp/micro.py` (Appen
 | `RandomState.rand(1_000_000) < p` (first malfunction draw) | 6.5 ms |
 | distance map at M: one `_compute` (warm) | 37 ms; **6 unique target sets for 200 agents**, stored as 200 copies (64 MB) |
 | target dedupe with list membership vs dict | 0.24 vs 0.06 ms at n = 200; 3.0 vs 0.6 ms at n = 2000 (real but small) |
-| `MotionCheck.find_conflicts`, m agents queued for one cell (synthetic; in the env, large m comes from off-map agents departing into one start cell, since an on-map cell has at most 4 predecessors) | 0.04 / 0.3 / 2.4 / 32 / 551 ms for m = 10 / 25 / 50 / 100 / 200: **grows as m^3.6** |
+| `MotionCheck.find_conflicts`, m agents queued for one cell (synthetic; in the env, large m comes from off-map agents departing into one start cell, since an on-map cell has at most 4 predecessors) | 0.04 / 0.3 / 2.4 / 32 / 551 ms for m = 10 / 25 / 50 / 100 / 200: **grows as about m⁴** at large m (m^3.6 fitted over 25–200, 4.1 between 100 and 200) |
 
 ### 2.5 What cProfile adds
 
@@ -230,7 +233,7 @@ P predictor depth.
 ### 3.1 Observation builders (the largest cost by far)
 
 **Tree observation** (`flatland/envs/observations.py`, `TreeObsForRailEnv`). It costs 80–84% of a step at M, about
-0.85 ms per agent per step [measured]. Each agent walks its tree cell by cell in Python. At every visited cell, it:
+0.84–0.91 ms per agent per step [measured]. Each agent walks its tree cell by cell in Python. At every visited cell, it:
 - parses the cell's 16-bit code as a string: `bin(...)`, `.count("1")` and `int(transition_bit, 2) == int('1000010000100001', 2)`
   (`observations.py:323-328`) [read];
 - builds `OrderedSet`s of visited cells that only the renderer reads (`dev_obs_dict`) [read];
@@ -318,7 +321,7 @@ precomputed offsets. Impact: none.
   - the env's own map is computed lazily on first read, which is the last step for configs b/d (2.6 s at L).
 
   Fix: a cache keyed by the target set, shared by the timetable generator and the env. The timetable's fake agents
-  target `{(waypoints[i+1][0].position, d) for all d}` (`timetable_generators.py:72`). For lines of two stops, that
+  target `{(waypoints[i+1][0].position, d) for all d}` (`timetable_generators.py:74`). For lines of two stops, that
   equals the env agents' targets; for longer lines, it is a different set per leg.
 - **Computed twice after every load and clone.** `RailEnvPersister` assigns the stored map and then calls `_compute`
   anyway (`persistence.py:312-314`), and the next `get()` computes it again [read].
@@ -394,7 +397,7 @@ Today, entry points are nested tuples `((r, c), d)`. The transition maps answer 
 decorators (`transition_map.py` 10, `grid4.py` 8, the grid and graph transition maps 5 and 6; 56 in the whole
 package). Instance-method caches are keyed by `self` through a Python-level `__hash__`
 (`core/transition_map.py:207`), so every lookup calls back into the interpreter. The caches hold strong references
-to old rails, up to `maxsize` = 1–4M entries [read]. `GridTransitionMap.__hash__` is called 600k times in 15
+to old rails, up to `maxsize` = 1–4M entries [read]. `GridTransitionMap.__hash__` is called 600–700k times in 15
 tree-observation steps at M [measured].
 
 Proposal: when a rail is finalised, number entry points `ep = 4·(r·W + c) + d` and build flat tables:
@@ -428,14 +431,14 @@ and done agents, and loop over active ones only. Precondition: check, per reward
 number p of conflicting pairs, and p grows quadratically with the number m of agents queued for one cell [read]. In
 the env, large m comes from off-map agents departing into one start cell (an on-map cell has at most 4
 predecessors).
-§2.4 measures m^3.6: 551 ms with 200 agents queued [measured]. In the random-policy runs, MotionCheck is 13% of
+§2.4 measures about m⁴ at large m: 551 ms with 200 agents queued [measured]. In the random-policy runs, MotionCheck is 13% of
 the dynamics at M and 5% at L [measured].
 
 Fix: an index cursor (or `deque`) over the queue, which makes it O(n + p). O(n + m) would need a per-resource
 reformulation, which the next paragraph rules out.
 
 **The queue order is part of the semantics.** For example, with three agents a < b < c asking for one free cell,
-the current order lets a move. Processing the pairs in the order (b, c), (a, c), (a, b) stops all three, because a
+the current order lets a move. Processing the pairs in the order (a, c), (b, c), (a, b) stops all three, because a
 stopped agent then blocks the others. So any rewrite must keep the exact order: pairs built in handle order, each
 resource's agents in insertion order, FIFO with appends. It must also be accepted by differential fuzzing against
 the current implementation. Iteration over the `deadlocked` set (`:325`) follows CPython's set order; `sorted()`
@@ -484,7 +487,7 @@ Found by reading [read]. Each needs a failing test before its fix.
 7. **`ConditionalMalfunctionEffectsGenerator._num_malfunctions` is never reset** (`malfunction_effects_generators.py:103`).
    `max_num_malfunctions` is therefore a lifetime cap.
 8. **`DummyPredictorForRailEnv` mutates the agents it predicts for.** It overwrites `agent.current_entry_point` on every
-   call (`predictions.py:73`), and restores it only at the end. The `raise` at `predictions.py:79` leaves it changed,
+   call (`predictions.py:74`), and restores it only at the end. The `raise` at `predictions.py:79` leaves it changed,
    and a read-only state view (§4.5) cannot support it.
 9. **PettingZoo `render()` cannot work.** It calls `self._wrap.render()`
    (`ml/pettingzoo/pettingzoo_parallel_rail_env.py:95`), but `RailEnv` has no `render` method.
@@ -493,7 +496,7 @@ Found by reading [read]. Each needs a failing test before its fix.
 11. **MotionCheck needs exclusive occupancy** (contract hazard). It assumes each resource is held by at most one
     agent; its termination argument ("in every round, one agent is stopped", `agent_chains.py:320`) relies on it.
     With two agents holding the same cell, `find_conflicts` loops forever. With three or more, its conflict queue also
-    grows until memory runs out: a fuzz test hit a `MemoryError` [measured]. The cause is that re-stopping an
+    grows until memory runs out: a fuzz test hit a `MemoryError` [observed once, no committed reproducer]. The cause is that re-stopping an
     already-stopped agent re-adds pairs for every other agent listed under its cell (`:375`). The env guarantees
     exclusivity, but legacy snapshots from the old same-cell bug (`tests/test_known_flatland_bugs.py`) or states edited
     by hand do not. Then `step()` hangs instead of failing. Assert exclusivity on `add_agent` with a
@@ -515,6 +518,7 @@ trajectories, observations or distance maps where the impact is "none"), and get
 | P2 | Global obs: shared layers, vectorised reset, asserts on the shared layers (the default-instance fix, bug 5, is its own PR) | none |
 | P3 | Tree obs T1–T3 | none |
 | P3b | Tree obs T6: call the predictor only when its output is read | api |
+| P3c | Tree obs T5: compute the conflict feature correctly (with bug 3) | obs |
 | P4 | Predictor next-hop table and incremental paths (with bug 2) | none |
 | P5 | Distance map: dict dedupe, multi-source BFS, compute once per load/clone; then the shared cache and the compact rows behind a compatible getter | none, then api |
 | P6 | MotionCheck: process the queue in place, O(n + p), with a differential fuzz test | none |
@@ -522,10 +526,11 @@ trajectories, observations or distance maps where the impact is "none"), and get
 | P8 | Integer speed ticks, in 2–3 PRs | none |
 | P9 | Integer entry-point tables (grid, then graph), in 2–3 PRs | none |
 | P10 | Tree obs T4 (segment graph) | none |
-| P11 | Reset: line-generator BFS, A* operand swap, `get_k_shortest_paths` | none / rng |
+| P11 | Reset: line-generator BFS, A* operand swap, `get_k_shortest_paths`, `_fix_transitions` dedupe | none / rng |
 | P12 | Malfunction fast path behind a flag | rng |
 | P13 | Trajectories: snapshot interval, observation reuse, typed info | api / format |
-| P14 | Bug fixes 3, 4 and 6–13, one PR each (6–8 are also milestone M0a) | obs / api |
+| P13b | Peripheral: Redis pipelining, lazy `matplotlib` import, gym flattening into a preallocated array | none |
+| P14 | Bug fixes 3, 4 and 6–13, one PR each (6–8 and the `sorted()` of 10 are also milestone M0a) | obs / api |
 | P15 | CI profiling covers the defaults, observation builders, load/clone and L-size scenarios; today only config b at M is profiled | — |
 
 The "none" PRs are also checked against the existing regression corpus: `benchmarks/benchmark_episodes.py`, 113
@@ -558,7 +563,7 @@ Non-goals, at least initially:
 
 These help both prongs:
 
-1. **A language-neutral state format** (JSON, versioned; continues
+1. **A versioned JSON state format** that both implementations read and write (continues
    [#129](https://github.com/flatland-association/flatland-rl/issues/129)):
    - the grid as a uint16 matrix, and level-free positions;
    - agents: initial / current / next / target entry points, waypoints with alternatives and time windows,
@@ -575,7 +580,9 @@ These help both prongs:
      expressions with imperative setup, so the trace stores the post-injection state, not a recipe.
    - It also records random-policy episodes and the realised malfunction schedule.
    - The traces are generated from `HEAD` in CI rather than taken from the archived benchmark episodes. The step
-     semantics still move fast: 157 commits touched the step code in six months, and
+     semantics still move fast: in the six months before `51f5621c`, 141 commits touched `rail_env.py`,
+     `step_utils/` and `agent_chains.py` (163 counting `rewards.py`, `agent_utils.py` and `malfunction_generators.py`),
+     and
      `tests/test_flatland_regression_episodes.py` is skipped because a timing fix made its episodes diverge.
 3. **A `SEMANTICS_VERSION` constant** in both implementations, bumped by any PR that changes trajectories.
 4. **A `RailEnvView` protocol** (`typing.Protocol`). It lists the members the ml adapters, built-in observation
@@ -590,6 +597,7 @@ parallel arrays, and the step becomes table lookups and integer arithmetic.
 struct EntryPointNetwork{L}         # grid and graph alike, built once per rail
     next::Matrix{Int32}             # (5 actions, nEP) → next entry point, 0 = none
     resource::Vector{Int32}         # entry point → resource id (cell, or cell+axis for level-free crossings)
+    valid::BitVector                # entry point is on the rail
     pred_ptr::Vector{Int32}         # CSR predecessors (distance maps)
     pred_idx::Vector{Int32}
     labels::Vector{L}               # (r, c, d) or graph node string, for I/O only
@@ -627,7 +635,7 @@ end
 step!(env, actions::AbstractVector{<:Integer})  # mutates env, returns nothing
 ```
 
-(`EntryPointNetwork` without the predecessor tables and labels exists since milestone M2.)
+(Milestone M2, #11, implements `EntryPointNetwork` for grid rails, without the predecessor tables and labels.)
 
 - **`step!` mirrors the Python control flow.** It follows effects (step start) → collect → MotionCheck →
   distribute → rewards → effects (step end), branch for branch as specified in `design_by_contract.md`. The `_check_*`
@@ -670,7 +678,7 @@ The versions are the latest in the General registry as of 2026-10-30.
 | click | CLIs | deferred; `@main` |
 | Cython | acceleration | not needed |
 | pytest, pytest-xdist | tests | Test (`@testset` files included by `runtests.jl`, as in DifferentiationInterface.jl) |
-| flake8, deptry | lint | Runic.jl 1.13 (as in DifferentiationInterface.jl), Aqua.jl 0.8, ExplicitImports.jl 1.15, JET.jl 0.9–0.13 (0.13 needs Julia ≥ 1.12; the older versions cover the LTS) |
+| flake8, deptry | lint | Runic.jl 1.13 (as in DifferentiationInterface.jl), Aqua.jl 0.8, ExplicitImports.jl 1.15, JET.jl 0.9.9–0.13 (only JET ≤ 0.9.18 runs on the 1.10 LTS: 0.9.19 needs Julia ≥ 1.11, and 0.10 and later need ≥ 1.12) |
 | cProfile, line_profiler | profiling | Profile stdlib, Chairmarks.jl 1.3, AirspeedVelocity.jl 0.6, AllocCheck.jl 0.2 |
 | jupyter-book (flatland-book) | docs | Documenter.jl 1.19 + Literate.jl 2.21 + DocumenterCitations.jl 1.5; a page in the flatland-book |
 | juliacall (new) | Python wrapper | PythonCall.jl 0.9.37, test-only (differential tests): juliacall pins its own exact PythonCall version, so Flatland.jl must not depend on it. With `JULIA_CONDAPKG_BACKEND=Null` and `JULIA_PYTHONCALL_EXE`, CI reuses the Python venv instead of a Conda one |
@@ -699,8 +707,8 @@ The versions are the latest in the General registry as of 2026-10-30.
   strided arrays of supported element types
   ([docs](https://juliapy.github.io/PythonCall.jl/stable/juliacall-reference/)).
 - An array-returning `step_arrays` next to the dict-based `step`. Building Python dicts of infos, rewards and dones
-  costs about as much as `get_info_dict` alone, 0.3 ms per step at M [measured], which would cap the end-to-end gain
-  of the dict API at a few × over today's 3.2 ms [estimate].
+  costs about as much as `get_info_dict` alone, 0.3 ms per step at M [measured], which caps the end-to-end gain of
+  the dict API at about 10× over today's 3.2 ms (3.2 / 0.3), and less against Python with P1–P9 landed [estimate].
 - A batched `step_many` amortises the call overhead.
 
 **The `RailEnvView` facade.**
@@ -718,8 +726,9 @@ The versions are the latest in the General registry as of 2026-10-30.
 **Startup latency.**
 - A PrecompileTools workload.
 - Docker images bake the depot and set `PYTHON_JULIAPKG_OFFLINE=yes`, with an optional sysimage.
-- Fork crashes. A child forked from a process running Julia segfaults (PythonCall issue
-  [#628](https://github.com/JuliaPy/PythonCall.jl/issues/628)), and Python ≤ 3.13 on Linux forks by default. Ray and
+- Fork failures. Julia does not survive a fork: the forked child raises `juliacall.JuliaError` (PythonCall issue
+  [#628](https://github.com/JuliaPy/PythonCall.jl/issues/628), whose workaround is `spawn`), and earlier versions
+  segfaulted ([#77](https://github.com/JuliaPy/PythonCall.jl/issues/77)). Python ≤ 3.13 on Linux forks by default. Ray and
   multiprocessing workers must use `spawn`, and the wrapper imports juliacall lazily.
 - juliacall starts Julia with one thread by default; batched stepping needs `PYTHON_JULIACALL_THREADS` (and
   `PYTHON_JULIACALL_HANDLE_SIGNALS=yes`).
@@ -731,7 +740,7 @@ The versions are the latest in the General registry as of 2026-10-30.
 | unit | port the transition, speed, MotionCheck and reward unit tests (`test_flatland_core_transitions.py`, `test_speed_counter.py`, `test_agent_chains.py`, `test_rewards.py`) | `@testset` |
 | tables | `EntryPointNetwork` against Python, exhaustively: every cell type × 4 headings × 5 actions, plus off-grid neighbours | golden JSON |
 | conformance | every `flatland-trace/1` trace replays bit-identically, comparing rationals exactly (stricter than the Python tests' `np.allclose`) | golden traces from CI |
-| differential | fuzz MotionCheck (about 10⁵ random configurations including swaps, chains and level-free crossings), then whole episodes, against the live Python implementation | PythonCall.jl + CondaPkg.jl, nightly |
+| differential | fuzz MotionCheck (about 10⁵ random configurations including swaps, chains and level-free crossings), then whole episodes, against the live Python implementation | PythonCall.jl with the CI's own Python (no Conda, see §4.4), nightly |
 | properties | invariants of the Python check net: at most one agent per resource except level-free crossings, speed ≤ max speed, distance in [0, 1], done agents off map | Supposition.jl |
 | quality | stale/missing deps, method ambiguities, type stability of `step!`, explicit imports, zero allocations | Aqua.jl, JET.jl (`test_package`, `@test_opt`), ExplicitImports.jl, AllocCheck.jl / `@allocated` |
 | Python wrapper | `tests/ml` smoke tests, and the Replay tests with their setup run in Python and exported (§4.5), parametrised over the backend | pytest `-m julia` |
@@ -752,10 +761,9 @@ the data change, and fails if the committed data is stale.
 - **Formatting check** (Runic).
 - **Docs:** built with `julia/Flatland/docs` as project, and `deploydocs(dirname = "julia", tag_prefix = "Flatland-")`
   so that the docs land in a subfolder of `gh-pages` and TagBot's subdirectory tags deploy versioned docs.
-- **Benchmarks:** the AirspeedVelocity action has no subdirectory input, and the `benchpkg` CLI's `--path` only works
-  with `--rev dirty` (named revisions go through `Pkg.add`, which fails for a subdirectory). So check out the base and
-  the head in two worktrees and run `benchpkg --rev dirty --path <worktree>/julia/Flatland --script ...` in each, with
-  separate output directories.
+- **Benchmarks:** the AirspeedVelocity action has no subdirectory input, and the `benchpkg` CLI is untested with named
+  revisions of a package in a subdirectory. So check out the base and the head in two worktrees and run
+  `benchpkg --rev dirty --path <worktree>/julia/Flatland --script ...` in each, with separate output directories.
 - **Conformance:** a Python job exports golden traces from `HEAD` as an artifact, and a Julia job replays them.
 - **Wrapper:** install `.[julia]` and run `pytest -m julia`.
 - **Bots:**
@@ -767,8 +775,8 @@ the data change, and fails if the committed data is stale.
   `Name-` prefix ([docs](https://setuptools-scm.readthedocs.io/en/latest/config/)), and `[tool.setuptools_scm]` is
   empty here (`pyproject.toml:128`). A Julia tag could therefore become the Python package's version. Before the
   first Julia tag, set `scm.git.describe_command` to match `v[0-9]*` only, which needs setuptools-scm ≥ 9.2 (9.0 and
-  9.1 are yanked), or `tag = {prefix = "v"}`, which needs ≥ 10.1. So bump `[build-system]`'s `setuptools_scm>=8`.
-  Tags `v4.3.0` then `Flatland-v0.1.0` gave the Python version `0.1.1.dev1` today (reproduced). M1 already excludes
+  9.1 are yanked), or `tag = {prefix = "v"}`, which needs ≥ 10.1.1 (10.1.0 is not on PyPI). So bump `[build-system]`'s `setuptools_scm>=8`.
+  Tags `v4.3.0` then `Flatland-v0.1.0` gave the Python version `0.1.1.dev1` today (reproduced in a scratch repository). M1 (#9) excludes
   `julia/` from release-please's root package (`exclude-paths`) and from the Python sdist (`MANIFEST.in`), which
   otherwise includes the git-tracked tree.
 
@@ -791,7 +799,7 @@ Each milestone is one PR of under 1000 added lines (generated data excluded), ex
 | M0c | Python: `flatland-trace/1` exporter | re-running it gives byte-identical output |
 | M1 | `julia/Flatland` scaffold, `julia.yml`, Aqua/JET/ExplicitImports/format/docs | CI green |
 | M1b | spike: juliacall calls a trivial function inside the Docker image | cold-start time and image size recorded; fork/spawn behaviour documented |
-| M2 | `EntryPointNetwork` for grid (resources included) and graph | exhaustive table equality with Python |
+| M2 | `EntryPointNetwork` for grid rails (resources included), then graph rails in a second PR | exhaustive table equality with Python |
 | M3 | integer ticks and the three `_candidate_*` functions | every case of `design_by_contract.md` Table 1 matches; zero allocations |
 | M4 | MotionCheck | differential fuzzing passes; O(n + p) |
 | M5 | `step!` + state import/export, malfunctions from an explicit schedule | positions, speeds, distances, states and dones of all golden traces bit-identical (rewards come with M6, seeded malfunctions with M7); no allocations once buffers are sized |
@@ -820,7 +828,8 @@ should be 4–6k lines plus tests.
   observations), and keep Python the reference.
 - **Custom Python observation builders** keep working through the facade, but at Python speed. Only the built-in
   ones get the Julia speed-up.
-- **Amdahl.** With a built-in observation builder, the dynamics are 2–4% of a step today [measured]. Until the
+- **Amdahl.** With a built-in observation builder, the dynamics are about 1–4% of a step today, about 1% at L
+  [measured]. Until the
   observations are ported (M9) and the wrapper avoids building Python dicts every step (`step_arrays`), a faster
   `step!` barely shows end to end.
 
@@ -837,10 +846,10 @@ Recommended order:
 3. **Julia milestones M0a–M5** in parallel with step 2, since M0a–M0c are Python-side anyway. Then M6–M12.
 4. **The remaining Python items** (P11–P15) whenever convenient.
 
-The decision point is after M5, measured end to end through the Python API (`step_arrays`, then `step`) for configs b
-and c, against Python with P1–P9 landed. If the Julia backend is not at least 10× faster at M and L for config b
-[estimate: the dynamics alone should gain two orders of magnitude], stop after Prong 1 and keep Python only. Config c
-only counts after M9.
+The decision point is after M5, measured end to end through the Python API for configs b and c, against Python with
+P1–P9 landed. If the Julia backend is not at least 10× faster through `step_arrays` at M and L for config b (the
+dict-based `step` cannot reach 10×, §4.5) [estimate: the dynamics alone should gain two orders of magnitude], stop
+after Prong 1 and keep Python only. Config c only counts after M9.
 
 ## 6. References
 
