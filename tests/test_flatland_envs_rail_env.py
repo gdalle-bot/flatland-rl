@@ -2826,3 +2826,30 @@ def test_graph_rail_env_step_checks_follow_source_env(source_checks):
     assert GraphRailEnv.from_rail_env(env, DummyObservationBuilder(), seed=1).check_step_pre_post_conditions is source_checks
     explicit = GraphRailEnv.from_rail_env(env, DummyObservationBuilder(), seed=1, check_step_pre_post_conditions=not source_checks)
     assert explicit.check_step_pre_post_conditions is (not source_checks)
+
+
+@pytest.mark.parametrize("builder_kwargs", [{}, {"obs_builder_object": None}], ids=["omitted", "none"])
+def test_default_observation_builder_is_not_shared_between_envs(builder_kwargs):
+    """
+    Two envs on 30x30 sparse rails with different seeds, both built without an observation builder (the argument
+    omitted, or passed as `None`).
+    - Setup: reset the first env, then the second.
+    - Each env has its own `GlobalObsForRailEnv`, still bound to that env after the other one was reset.
+    - After a step with no actions, the first env's rail layer equals that of a separate `GlobalObsForRailEnv` reset on
+      the first env, and differs from the second env's.
+    """
+    env1 = RailEnv(width=30, height=30, number_of_agents=2, random_seed=1, **builder_kwargs)
+    env2 = RailEnv(width=30, height=30, number_of_agents=2, random_seed=2, **builder_kwargs)
+    env1.reset(random_seed=1)
+    env2.reset(random_seed=2)
+    assert isinstance(env1.obs_builder, GlobalObsForRailEnv)
+    assert isinstance(env2.obs_builder, GlobalObsForRailEnv)
+    assert env1.obs_builder is not env2.obs_builder
+    assert env1.obs_builder.env is env1
+    assert env2.obs_builder.env is env2
+    obs1, _, _, _ = env1.step({})
+    reference1, reference2 = GlobalObsForRailEnv(), GlobalObsForRailEnv()
+    reference1.reset(env1)
+    reference2.reset(env2)
+    assert np.array_equal(obs1[0][0], reference1.rail_obs)
+    assert not np.array_equal(obs1[0][0], reference2.rail_obs)
