@@ -30,6 +30,7 @@ from flatland.core.grid.grid4_utils import get_new_position
 from flatland.core.transition_map import GridTransitionMap, TransitionMap
 from flatland.envs.rail_env import RailEnv
 from flatland.envs.rail_env_action import RailEnvActions
+from flatland.utils.ordered_set import OrderedSet
 
 GridNode = str
 GridEdge = Tuple[str]
@@ -147,7 +148,7 @@ class GraphTransitionMap(TransitionMap[GridNode, GridEdge, bool, RailEnvActions]
         succs = list(self.g.successors(entry_point))
         for v in succs:
             edge_data = self.g.get_edge_data(entry_point, v)
-            if action in edge_data["actions"]:
+            if action in edge_data.get("actions", ()):
                 return v
 
     def get_transitions(self, entry_point: GridNode) -> Tuple[bool]:
@@ -169,9 +170,30 @@ class GraphTransitionMap(TransitionMap[GridNode, GridEdge, bool, RailEnvActions]
         r, c, d = ast.literal_eval(s)
         return ((r, c), d)
 
-    @lru_cache
+    @lru_cache(maxsize=4_000_000)
     def get_successor_entry_points(self, entry_point: GridNode) -> Set[GridNode]:
-        return set(self.g.successors(entry_point))
+        """
+        The successors of an entry point, in the order of grid rails.
+
+        Parameters
+        ----------
+        entry_point : GridNode
+            The node whose successors are returned.
+
+        Returns
+        -------
+        OrderedSet
+            First the nodes reached with `MOVE_LEFT`, `MOVE_FORWARD` and `MOVE_RIGHT`, in this order, as
+            `apply_action_independent`, then any other successor in the graph's order. Shortest paths break ties between
+            equally short successors in this order.
+        """
+        successors = OrderedSet()
+        for action in (RailEnvActions.MOVE_LEFT, RailEnvActions.MOVE_FORWARD, RailEnvActions.MOVE_RIGHT):
+            target = self.apply_action_independent(action, entry_point)
+            if target is not None:
+                successors.add(target)
+        successors.update(self.g.successors(entry_point))
+        return successors
 
     @lru_cache
     def get_predecessor_entry_points(self, entry_point: GridNode) -> Set[GridNode]:
