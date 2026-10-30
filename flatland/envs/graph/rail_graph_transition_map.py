@@ -148,7 +148,7 @@ class GraphTransitionMap(TransitionMap[GridNode, GridEdge, bool, RailEnvActions]
         succs = list(self.g.successors(entry_point))
         for v in succs:
             edge_data = self.g.get_edge_data(entry_point, v)
-            if action in edge_data["actions"]:
+            if action in edge_data.get("actions", ()):
                 return v
 
     def get_transitions(self, entry_point: GridNode) -> Tuple[bool]:
@@ -170,24 +170,30 @@ class GraphTransitionMap(TransitionMap[GridNode, GridEdge, bool, RailEnvActions]
         r, c, d = ast.literal_eval(s)
         return ((r, c), d)
 
-    # the order in which grid rails list successors (`RailGridTransitionMap.get_successor_entry_points`)
-    _SUCCESSOR_ACTIONS = (RailEnvActions.MOVE_LEFT, RailEnvActions.MOVE_FORWARD, RailEnvActions.MOVE_RIGHT)
-
-    @lru_cache
+    @lru_cache(maxsize=4_000_000)
     def get_successor_entry_points(self, entry_point: GridNode) -> Set[GridNode]:
         """
-        The successors of `entry_point`, ordered as on grid rails: by the first of `MOVE_LEFT`, `MOVE_FORWARD` and
-        `MOVE_RIGHT` whose edge leads to each. Successors that no moving action leads to come last, in the graph's
-        order. Shortest paths break ties between equally short successors in this order.
+        The successors of an entry point, in the order of grid rails.
+
+        Parameters
+        ----------
+        entry_point : GridNode
+            The node whose successors are returned.
+
+        Returns
+        -------
+        OrderedSet
+            First the nodes reached with `MOVE_LEFT`, `MOVE_FORWARD` and `MOVE_RIGHT`, in this order, as
+            `apply_action_independent`, then any other successor in the graph's order. Shortest paths break ties between
+            equally short successors in this order.
         """
         successors = OrderedSet()
-        successors.update(sorted(self.g.successors(entry_point), key=lambda v: self._first_moving_action(entry_point, v)))
+        for action in (RailEnvActions.MOVE_LEFT, RailEnvActions.MOVE_FORWARD, RailEnvActions.MOVE_RIGHT):
+            target = self.apply_action_independent(action, entry_point)
+            if target is not None:
+                successors.add(target)
+        successors.update(self.g.successors(entry_point))
         return successors
-
-    def _first_moving_action(self, u: GridNode, v: GridNode) -> int:
-        """Position in `_SUCCESSOR_ACTIONS` of the first action of the edge from `u` to `v`, past the end if none."""
-        actions = {RailEnvActions.from_value(a) for a in self.g[u][v].get("actions", ())}
-        return next((k for k, action in enumerate(self._SUCCESSOR_ACTIONS) if action in actions), len(self._SUCCESSOR_ACTIONS))
 
     @lru_cache
     def get_predecessor_entry_points(self, entry_point: GridNode) -> Set[GridNode]:

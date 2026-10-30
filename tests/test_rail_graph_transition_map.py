@@ -9,8 +9,11 @@ from flatland.core.grid.grid4 import Grid4TransitionsEnum
 from flatland.env_generation.env_generator import env_generator
 from flatland.envs.graph.rail_graph_transition_map import GraphTransitionMap
 from flatland.envs.graph_rail_env import GraphRailEnv
+from flatland.envs.line_generators import sparse_line_generator
+from flatland.envs.rail_env import RailEnv
 from flatland.envs.grid.rail_env_grid import RailEnvTransitions, RailEnvTransitionsEnum
 from flatland.envs.rail_env_action import RailEnvActions
+from flatland.envs.rail_generators import sparse_rail_generator
 from flatland.envs.rail_grid_transition_map import RailGridTransitionMap
 
 # rows are top to bottom!
@@ -167,17 +170,47 @@ def test_grid_to_digraph(transition, expected_edges):
     assert set(actual_edges) == set(expected_edges)
 
 
-def test_successors_ordered_by_first_moving_action():
+def test_successors_ordered_as_on_grid_rails():
     """
-    A node "u" with two successors: "right", reached with MOVE_RIGHT and added to the graph first, and "left", reached
-    with MOVE_LEFT and MOVE_FORWARD.
-    - The successors come in the order of grid rails: "left" (MOVE_LEFT) before "right" (MOVE_RIGHT), whatever the
-      graph's insertion order or the hashing of the node names.
+    A node "u" with four successors, added to the graph in this order: "other", reached with no action, then "right"
+    (MOVE_RIGHT), "forward" (MOVE_FORWARD, DO_NOTHING, STOP_MOVING) and "left" (MOVE_LEFT).
+    - The successors come in the order of grid rails, whatever the graph's insertion order or the hashing of the node
+      names: "left", "forward", "right", then "other".
     """
     g = nx.DiGraph()
+    g.add_edge("u", "other")
     g.add_edge("u", "right", actions={RailEnvActions.MOVE_RIGHT})
-    g.add_edge("u", "left", actions={RailEnvActions.MOVE_LEFT, RailEnvActions.MOVE_FORWARD})
-    assert list(GraphTransitionMap(g).get_successor_entry_points("u")) == ["left", "right"]
+    g.add_edge("u", "forward", actions={RailEnvActions.MOVE_FORWARD, RailEnvActions.DO_NOTHING, RailEnvActions.STOP_MOVING})
+    g.add_edge("u", "left", actions={RailEnvActions.MOVE_LEFT})
+    assert list(GraphTransitionMap(g).get_successor_entry_points("u")) == ["left", "forward", "right", "other"]
+
+
+def _grid_envs():
+    """Generated grid envs, the last one with level-free crossings."""
+    envs = [env_generator(seed=seed)[0] for seed in range(42, 50)]
+    level_free = RailEnv(width=30, height=30, number_of_agents=2, random_seed=1,
+                         rail_generator=sparse_rail_generator(max_num_cities=3, p_level_free=1.0),
+                         line_generator=sparse_line_generator(), obs_builder_object=DummyObservationBuilder())
+    level_free.reset(random_seed=1)
+    return envs + [level_free]
+
+
+@pytest.mark.parametrize("env_index", range(9))
+def test_graph_successors_equal_grid_successors(env_index):
+    """
+    A generated grid env (the ninth one with level-free crossings), converted to a graph.
+    - At every valid entry point, the graph lists the same successors as the grid, in the same order.
+    """
+    grid = _grid_envs()[env_index].rail
+    graph = GraphTransitionMap(GraphTransitionMap.grid_to_digraph(grid))
+    to_graph = GraphTransitionMap.grid_entry_point_to_graph_entry_point
+    for r in range(grid.height):
+        for c in range(grid.width):
+            for d in range(4):
+                if not grid.is_valid_entry_point(((r, c), d)):
+                    continue
+                expected = [to_graph(r2, c2, d2) for (r2, c2), d2 in grid.get_successor_entry_points(((r, c), d))]
+                assert list(graph.get_successor_entry_points(to_graph(r, c, d))) == expected, ((r, c), d)
 
 
 @pytest.mark.parametrize("seed", range(42, 50))
@@ -185,7 +218,7 @@ def test_graph_shortest_paths_equal_grid_shortest_paths(seed):
     """
     Seven agents on a generated grid env, converted to a GraphRailEnv.
     - Every agent's shortest path in the graph env is its shortest path in the grid env: ties between equally short
-      successors are broken in the same order, independently of PYTHONHASHSEED.
+      successors are broken in the same order.
     """
     grid_env, _, _ = env_generator(seed=seed)
     graph_env = GraphRailEnv.from_rail_env(grid_env, DummyObservationBuilder(), seed=seed, rewards=type(grid_env.rewards)())
