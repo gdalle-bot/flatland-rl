@@ -8,6 +8,9 @@ env:
     # single source of truth for which matrix leg of the profiling/profiling-get-k-shortest-paths jobs
     # publishes to the gist/PR comment - see those jobs for why it's 3.13, not the latest (3.14) or 3.12
     profiling-python-version: "3.13"
+    # "true" only where the GIST_TOKEN secret is configured - gates the profiling jobs' gist/comment step, so
+    # same-repo PRs on a fork without this secret skip it instead of failing on gist authentication
+    HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
 
 on:
     workflow_dispatch:
@@ -368,10 +371,6 @@ jobs:
         permissions:
             contents: read
             pull-requests: write
-        env:
-            # "true" only where the GIST_TOKEN secret is configured. Same-repo PRs on a fork without this
-            # secret then skip the gist/comment step below instead of failing on gist authentication.
-            HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
         strategy:
             fail-fast: false
             matrix:
@@ -409,8 +408,9 @@ jobs:
                         benchmarks/*.png
                     if-no-files-found: error
             # Only the env.profiling-python-version leg publishes to a gist and comments on the PR - no need
-            # to repeat the same picture for every matrix entry. Restricted to same-repo PRs since forks
-            # don't receive secrets (GIST_TOKEN), so the gist/comment step would just fail auth on a fork PR.
+            # to repeat the same picture for every matrix entry. Restricted to same-repo PRs since PRs
+            # from forks don't receive secrets (GIST_TOKEN), and to repositories where GIST_TOKEN is configured at
+            # all (HAS_GIST_TOKEN, e.g. not on a fork's own PRs) - otherwise the gist push would just fail auth.
             #
             # NOT 3.12: cProfile can't see calls into compiled Cython functions on Python 3.12 at all (not
             # zero-time, just absent from the stats) - confirmed against cython/cython#5470: Python 3.12
@@ -438,10 +438,6 @@ jobs:
         permissions:
             contents: read
             pull-requests: write
-        env:
-            # "true" only where the GIST_TOKEN secret is configured. Same-repo PRs on a fork without this
-            # secret then skip the gist/comment step below instead of failing on gist authentication.
-            HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
         strategy:
             fail-fast: false
             matrix:
