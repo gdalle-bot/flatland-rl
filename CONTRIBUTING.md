@@ -108,6 +108,10 @@ Ready to contribute? Here's how to set up `flatland` for local development.
     # After the first time, a simple `git push` will do the trick.
     ```
 
+    The test suite runs with `RailEnv.step()`'s pre/postcondition checks on (the repository-root `conftest.py` sets
+    `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS=1`). Set the same variable when you debug a script or notebook outside
+    pytest.
+
 11. Open a pull request on GitHub targeting the `main` branch.
     Make sure to fill out the template.
     A review from a core team member is automatically requested.
