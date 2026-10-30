@@ -4,6 +4,7 @@ Usage: python benchmarks/revamp/micro.py T0 [OUT_DIR]
   T0: step of scenario M at which to measure the observation builders (1240 in REVAMP.md, the step with the most agents
   on the map in flatbench's M/b run). Writes OUT_DIR/micro.json (default revamp_out).
 """
+import importlib.util
 import json
 import os
 import sys
@@ -13,11 +14,20 @@ from time import perf_counter_ns as now
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(__file__))
-import flatbench  # noqa: E402
-from flatland.envs import observations as obs_mod  # noqa: E402
-from flatland.envs.agent_chains import MotionCheck  # noqa: E402
-from flatland.envs.step_utils.speed_counter import SpeedCounter, cached_cell_exit  # noqa: E402
+from flatland.envs import observations as obs_mod
+from flatland.envs.agent_chains import MotionCheck
+from flatland.envs.step_utils.speed_counter import SpeedCounter, cached_cell_exit
+
+
+def _load_flatbench():
+    """The `flatbench.py` script next to this one, loaded by path since it is not an installed module."""
+    spec = importlib.util.spec_from_file_location("flatbench", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flatbench.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+flatbench = _load_flatbench()
 
 OUT = {}
 
