@@ -7,7 +7,7 @@ The measurements in `REVAMP.md` §2 come from these scripts, run on commit `51f5
 |---|---|
 | `flatbench.py` | builds an env for a scenario (S, M, L) and configuration (a–d, see `REVAMP.md` §2), times `reset()` and every `step()` phase with timestamps around the calls that bracket them, or records cProfile `.prof` files |
 | `run_all.sh` | runs all `flatbench.py` jobs of §2 one after the other, with timeouts (about 8 minutes on one core) |
-| `micro.py` | the micro-benchmarks of §2.4. Some target code that later changes removed (e.g. the tree observation's conflict check), so they reproduce on `51f5621c` only |
+| `micro.py` | the micro-benchmarks of §2.4. Some target code that the revamp's speed-ups change or remove (e.g. the tree observation's conflict check), so they reproduce on `51f5621c` only |
 | `analyze.py` | turns the outputs into the Markdown tables of §2 |
 
 From the repository root:

@@ -2,8 +2,10 @@
 
 Usage: python benchmarks/revamp/flatbench.py SCEN CFG MODE [--reps R] [--early N] [--late N] [--t0 T] [--seed S]
                                              [--out DIR] [--tag TAG]
-  SCEN in S, M, L, L2, L3; CFG in a (defaults), b (dummy obs, checks off), c (tree obs, checks off),
-  d (dummy obs, checks on); MODE in timing (wall-clock phases), cprofile (.prof files).
+  SCEN in S, M, L (L2, L3: smaller fallbacks of L); CFG in a (the constructor defaults of commit 51f5621c: global
+  obs, checks on), b (dummy obs, checks off), c (tree obs, checks off), d (dummy obs, checks on); MODE in timing
+  (wall-clock phases), cprofile (.prof files). The step checks are always passed explicitly, since their default
+  changed after 51f5621c.
 Writes OUT/SCEN_CFG_MODE[TAG].json. See benchmarks/revamp/README.md.
 """
 import argparse
@@ -45,13 +47,15 @@ def make_env(scen, cfg, seed):
               rail_generator=sparse_rail_generator(max_num_cities=c, max_rails_between_cities=2, max_rail_pairs_in_city=2),
               line_generator=sparse_line_generator(SPEEDS),
               malfunction_generator=ParamMalfunctionGen(MalfunctionParameters(malfunction_rate=1 / 10000, min_duration=15, max_duration=50)))
-    if cfg == "b":
+    if cfg == "a":
+        kw.update(check_step_pre_post_conditions=True)
+    elif cfg == "b":
         kw.update(obs_builder_object=DummyObservationBuilder(), check_step_pre_post_conditions=False)
     elif cfg == "c":
         kw.update(obs_builder_object=TreeObsForRailEnv(max_depth=3, predictor=ShortestPathPredictorForRailEnv(max_depth=50)),
                   check_step_pre_post_conditions=False)
     elif cfg == "d":
-        kw.update(obs_builder_object=DummyObservationBuilder())
+        kw.update(obs_builder_object=DummyObservationBuilder(), check_step_pre_post_conditions=True)
     return RailEnv(**kw)
 
 
