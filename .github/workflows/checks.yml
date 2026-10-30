@@ -353,6 +353,10 @@ jobs:
         permissions:
             contents: read
             pull-requests: write
+        env:
+            # "true" only where the GIST_TOKEN secret is configured. Same-repo PRs on a fork without this
+            # secret then skip the gist/comment step below instead of failing on gist authentication.
+            HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
         strategy:
             fail-fast: false
             matrix:
@@ -404,7 +408,7 @@ jobs:
             -   name: Report overall profiling result
                 if: >-
                     ${{ github.event_name == 'pull_request' && matrix.python-version == env.profiling-python-version &&
-                    github.event.pull_request.head.repo.full_name == github.repository }}
+                    github.event.pull_request.head.repo.full_name == github.repository && env.HAS_GIST_TOKEN == 'true' }}
                 uses: ./.github/actions/profiling-comment
                 with:
                     comment-marker: flatland-ci-profiling-overall
@@ -419,6 +423,10 @@ jobs:
         permissions:
             contents: read
             pull-requests: write
+        env:
+            # "true" only where the GIST_TOKEN secret is configured. Same-repo PRs on a fork without this
+            # secret then skip the gist/comment step below instead of failing on gist authentication.
+            HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
         strategy:
             fail-fast: false
             matrix:
@@ -466,7 +474,7 @@ jobs:
             -   name: Report get_k_shortest_paths profiling result
                 if: >-
                     ${{ github.event_name == 'pull_request' && matrix.python-version == env.profiling-python-version &&
-                    github.event.pull_request.head.repo.full_name == github.repository }}
+                    github.event.pull_request.head.repo.full_name == github.repository && env.HAS_GIST_TOKEN == 'true' }}
                 uses: ./.github/actions/profiling-comment
                 with:
                     comment-marker: flatland-ci-profiling-get-k-shortest-paths
