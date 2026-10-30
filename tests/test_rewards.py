@@ -931,15 +931,19 @@ def test_ecml2026_rewards_normalization():
 
 INTERMEDIATE_NOT_SERVED_PENALTY = 33
 LATE_ARRIVAL_FACTOR = 0.2
+EARLY_DEPARTURE_FACTOR = 0.5
 
 # a two-cell station: the train may halt at either cell
 STATION_CELL_A = Waypoint((2, 2), 2)
 STATION_CELL_B = Waypoint((2, 3), 2)
 
 
-def _agent_with_two_cell_intermediate_station(latest_arrival_intermediate: int = 11, earliest_departure_intermediate: int = 7) -> Tuple[BaseDefaultRewards, EnvAgent, DistanceMap]:
+def _agent_with_two_cell_intermediate_station(
+    latest_arrival_intermediate: int = 11, earliest_departure_intermediate: int = 7, station_cells=(STATION_CELL_A, STATION_CELL_B),
+) -> Tuple[BaseDefaultRewards, EnvAgent, DistanceMap]:
     rewards = BaseDefaultRewards(intermediate_not_served_penalty=INTERMEDIATE_NOT_SERVED_PENALTY,
-                                 intermediate_late_arrival_penalty_factor=LATE_ARRIVAL_FACTOR)
+                                 intermediate_late_arrival_penalty_factor=LATE_ARRIVAL_FACTOR,
+                                 intermediate_early_departure_penalty_factor=EARLY_DEPARTURE_FACTOR)
     agent = EnvAgent(initial_entry_point=((0, 0), 0),
                      targets={((3, 3), d) for d in Grid4TransitionsEnum},
                      current_entry_point=None,
@@ -947,7 +951,7 @@ def _agent_with_two_cell_intermediate_station(latest_arrival_intermediate: int =
                      state_machine=TrainStateMachine(initial_state=TrainState.MOVING),
                      earliest_departure=3,
                      latest_arrival=30,
-                     waypoints=[[Waypoint((0, 0), 0)], [STATION_CELL_A, STATION_CELL_B], [Waypoint((3, 3), None)]],
+                     waypoints=[[Waypoint((0, 0), 0)], list(station_cells), [Waypoint((3, 3), None)]],
                      waypoints_earliest_departure=[3, earliest_departure_intermediate, None],
                      waypoints_latest_arrival=[None, latest_arrival_intermediate, 30],
                      arrival_time=25)
@@ -1030,27 +1034,35 @@ def test_multicell_station_not_served_when_only_rolled_through():
     assert d[DefaultPenalties.INTERMEDIATE_EARLY_DEPARTURE.value] == 0
 
 
-def test_multicell_station_tie_scored_on_first_cell_of_the_line():
+@pytest.mark.parametrize("station_cells, expected_late, expected_early", [
+    ((STATION_CELL_A, STATION_CELL_B), LATE_ARRIVAL_FACTOR * (11 - 16), 0),
+    ((STATION_CELL_B, STATION_CELL_A), 0, EARLY_DEPARTURE_FACTOR * (5 - 7)),
+], ids=["A-listed-first", "B-listed-first"])
+def test_multicell_station_tie_scored_on_first_listed_cell(station_cells, expected_late, expected_early):
     """
-    An agent whose line lists the two cells of an intermediate station as A=(2,2) then B=(2,3) halts at both, with the
-    same total penalty at each: latest arrival 11, earliest departure 7, late-arrival factor 0.2, early-departure factor
-    0.5.
+    An agent halts at both cells A=(2,2) and B=(2,3) of an intermediate station, with the same total penalty at each:
+    latest arrival 11, earliest departure 7, late-arrival factor 0.2, early-departure factor 0.5. Parametrized over the
+    order in which the agent's line lists the two cells.
     - Setup: it halts at B at step 3 and leaves it at step 5, 2 steps before its earliest departure (-1.0), then halts at A
       at step 16, 5 steps late (-1.0).
-    - The tie is scored on A, the first cell of the line: a late-arrival penalty of -1.0 and no early-departure
-      penalty.
+    - The tie is scored on the first-listed cell: with A first, a late-arrival penalty of -1.0 and no early-departure
+      penalty; with B first, the other way round.
     """
-    rewards, agent, distance_map = _agent_with_two_cell_intermediate_station(latest_arrival_intermediate=11, earliest_departure_intermediate=7)
+    rewards, agent, distance_map = _agent_with_two_cell_intermediate_station(
+        latest_arrival_intermediate=11, earliest_departure_intermediate=7, station_cells=station_cells)
     approach, off_station = Waypoint((1, 2), 2), Waypoint((1, 3), 0)
-    _visit(rewards, agent, distance_map, STATION_CELL_B, TrainState.STOPPED, 3, approach)
-    _visit(rewards, agent, distance_map, off_station, TrainState.MOVING, 5, STATION_CELL_B)  # leaves B
-    _visit(rewards, agent, distance_map, STATION_CELL_A, TrainState.STOPPED, 16, off_station)
-    _visit(rewards, agent, distance_map, STATION_CELL_A, TrainState.MOVING, 17, STATION_CELL_A)
+    _visit(rewards=rewards, agent=agent, distance_map=distance_map, waypoint=STATION_CELL_B, state=TrainState.STOPPED, elapsed_steps=3,
+           old=approach)
+    # leaves B
+    _visit(rewards=rewards, agent=agent, distance_map=distance_map, waypoint=off_station, state=TrainState.MOVING, elapsed_steps=5,
+           old=STATION_CELL_B)
+    _visit(rewards=rewards, agent=agent, distance_map=distance_map, waypoint=STATION_CELL_A, state=TrainState.STOPPED, elapsed_steps=16,
+           old=off_station)
 
     d = rewards.step_reward(agent, None, distance_map, elapsed_steps=25)
     assert d[DefaultPenalties.INTERMEDIATE_NOT_SERVED.value] == 0
-    assert d[DefaultPenalties.INTERMEDIATE_LATE_ARRIVAL.value] == LATE_ARRIVAL_FACTOR * (11 - 16)
-    assert d[DefaultPenalties.INTERMEDIATE_EARLY_DEPARTURE.value] == 0
+    assert d[DefaultPenalties.INTERMEDIATE_LATE_ARRIVAL.value] == expected_late
+    assert d[DefaultPenalties.INTERMEDIATE_EARLY_DEPARTURE.value] == expected_early
 
 
 @pytest.mark.parametrize("revisit_cell,revisit_halts", [

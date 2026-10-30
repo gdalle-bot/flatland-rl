@@ -306,13 +306,12 @@ class BaseDefaultRewards(Rewards[Dict[str, float]], Generic[EntryPointT]):
                                                                    agent.get_current_delay(elapsed_steps, distance_map))
         agent_waypoints = self._sanitize_waypoints(agent.waypoints)
         for intermediate_alternatives, la, ed in self._intermediate_waypoints(agent_waypoints, agent):
-            agent_arrivals: Set[EntryPointT] = set(self.arrivals[agent.handle])
             # a station may consist of several halting cells (alternative waypoints);
-            # the stop is served iff the train stopped at any of them. They are taken in the order of the agent's
-            # line, so that ties between them do not depend on the iteration order of a set.
+            # the stop is served iff the train stopped at any of them. They are taken in the order the agent's line
+            # lists them, so that ties between them do not depend on the iteration order of a set.
             stopped_wps: List[EntryPointT] = [
                 wp for wp in dict.fromkeys(intermediate_alternatives)
-                if wp in agent_arrivals and wp in self.stopped_waypoints[agent.handle]
+                if wp in self.arrivals[agent.handle] and wp in self.stopped_waypoints[agent.handle]
             ]
             if len(stopped_wps) == 0:
                 # stop not served or served but not stopped
