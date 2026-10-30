@@ -1,11 +1,16 @@
 import ast
 
+import networkx as nx
 import numpy as np
 import pytest
 
+from flatland.core.env_observation_builder import DummyObservationBuilder
 from flatland.core.grid.grid4 import Grid4TransitionsEnum
+from flatland.env_generation.env_generator import env_generator
 from flatland.envs.graph.rail_graph_transition_map import GraphTransitionMap
+from flatland.envs.graph_rail_env import GraphRailEnv
 from flatland.envs.grid.rail_env_grid import RailEnvTransitions, RailEnvTransitionsEnum
+from flatland.envs.rail_env_action import RailEnvActions
 from flatland.envs.rail_grid_transition_map import RailGridTransitionMap
 
 # rows are top to bottom!
@@ -160,3 +165,34 @@ def test_grid_to_digraph(transition, expected_edges):
     print(f"missing edges: {set(expected_edges) - set(actual_edges)}")
     assert len(actual_edges) == len(expected_edges)
     assert set(actual_edges) == set(expected_edges)
+
+
+def test_successors_ordered_by_first_moving_action():
+    """
+    A node "u" with two successors: "right", reached with MOVE_RIGHT and added to the graph first, and "left", reached
+    with MOVE_LEFT and MOVE_FORWARD.
+    - The successors come in the order of grid rails: "left" (MOVE_LEFT) before "right" (MOVE_RIGHT), whatever the
+      graph's insertion order or the hashing of the node names.
+    """
+    g = nx.DiGraph()
+    g.add_edge("u", "right", actions={RailEnvActions.MOVE_RIGHT})
+    g.add_edge("u", "left", actions={RailEnvActions.MOVE_LEFT, RailEnvActions.MOVE_FORWARD})
+    assert list(GraphTransitionMap(g).get_successor_entry_points("u")) == ["left", "right"]
+
+
+@pytest.mark.parametrize("seed", range(42, 50))
+def test_graph_shortest_paths_equal_grid_shortest_paths(seed):
+    """
+    Seven agents on a generated grid env, converted to a GraphRailEnv.
+    - Every agent's shortest path in the graph env is its shortest path in the grid env: ties between equally short
+      successors are broken in the same order, independently of PYTHONHASHSEED.
+    """
+    grid_env, _, _ = env_generator(seed=seed)
+    graph_env = GraphRailEnv.from_rail_env(grid_env, DummyObservationBuilder(), seed=seed, rewards=type(grid_env.rewards)())
+    grid_paths = grid_env.distance_map.get_shortest_paths()
+    graph_paths = graph_env.distance_map.get_shortest_paths()
+    for handle, grid_path in grid_paths.items():
+        graph_path = graph_paths[handle]
+        expected = None if grid_path is None else [(tuple(int(x) for x in w.position), int(w.direction)) for w in grid_path]
+        actual = None if graph_path is None else [GraphTransitionMap.graph_entry_point_to_grid_entry_point(str(w)) for w in graph_path]
+        assert actual == expected, handle
