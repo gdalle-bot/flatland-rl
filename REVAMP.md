@@ -500,6 +500,9 @@ Found by reading [read]. Each needs a failing test before its fix.
     resource → holder dict.
 12. **`reset(random_seed=s)` on a used env does not reproduce a fresh env's malfunctions.** `ParamMalfunctionGen`'s
     `_cached_rand` and `_rand_idx` survive `reset()` (`malfunction_generators.py:57-79`).
+13. **`PolicyRunner.create_from_policy` shares the caller's state with a second env.** It hands `env.obs_builder`,
+    `env.rewards` and `env.effects_generator` to an env loaded from a snapshot (`policy_runner.py:105-129`), which
+    rebinds the builder to itself and accumulates its rewards into the caller's per-episode reward state.
 
 ### 3.11 PR sequence
 
@@ -522,7 +525,7 @@ trajectories, observations or distance maps where the impact is "none"), and get
 | P11 | Reset: line-generator BFS, A* operand swap, `get_k_shortest_paths` | none / rng |
 | P12 | Malfunction fast path behind a flag | rng |
 | P13 | Trajectories: snapshot interval, observation reuse, typed info | api / format |
-| P14 | Bug fixes 3, 4 and 6–12, one PR each (6–8 are also milestone M0a) | obs / api |
+| P14 | Bug fixes 3, 4 and 6–13, one PR each (6–8 are also milestone M0a) | obs / api |
 | P15 | CI profiling covers the defaults, observation builders, load/clone and L-size scenarios; today only config b at M is profiled | — |
 
 The "none" PRs are also checked against the existing regression corpus: `benchmarks/benchmark_episodes.py`, 113
@@ -666,7 +669,7 @@ The versions are the latest in the General registry as of 2026-10-30.
 | redis, crowdai, boto3 | evaluator | stays in Python |
 | click | CLIs | deferred; `@main` |
 | Cython | acceleration | not needed |
-| pytest, pytest-xdist | tests | Test + TestItems.jl 1.1 / TestItemRunner.jl 1.3 |
+| pytest, pytest-xdist | tests | Test (`@testset` files included by `runtests.jl`, as in DifferentiationInterface.jl) |
 | flake8, deptry | lint | Runic.jl 1.13 (as in DifferentiationInterface.jl), Aqua.jl 0.8, ExplicitImports.jl 1.15, JET.jl 0.9–0.13 (0.13 needs Julia ≥ 1.12; the older versions cover the LTS) |
 | cProfile, line_profiler | profiling | Profile stdlib, Chairmarks.jl 1.3, AirspeedVelocity.jl 0.6, AllocCheck.jl 0.2 |
 | jupyter-book (flatland-book) | docs | Documenter.jl 1.19 + Literate.jl 2.21 + DocumenterCitations.jl 1.5; a page in the flatland-book |
@@ -725,7 +728,7 @@ The versions are the latest in the General registry as of 2026-10-30.
 
 | layer | what | tools |
 |---|---|---|
-| unit | port the transition, speed, MotionCheck and reward unit tests (`test_flatland_core_transitions.py`, `test_speed_counter.py`, `test_agent_chains.py`, `test_rewards.py`) | `@testitem` (TestItems.jl), run by TestItemRunner.jl |
+| unit | port the transition, speed, MotionCheck and reward unit tests (`test_flatland_core_transitions.py`, `test_speed_counter.py`, `test_agent_chains.py`, `test_rewards.py`) | `@testset` |
 | tables | `EntryPointNetwork` against Python, exhaustively: every cell type × 4 headings × 5 actions, plus off-grid neighbours | golden JSON |
 | conformance | every `flatland-trace/1` trace replays bit-identically, comparing rationals exactly (stricter than the Python tests' `np.allclose`) | golden traces from CI |
 | differential | fuzz MotionCheck (about 10⁵ random configurations including swaps, chains and level-free crossings), then whole episodes, against the live Python implementation | PythonCall.jl + CondaPkg.jl, nightly |
@@ -736,13 +739,16 @@ The versions are the latest in the General registry as of 2026-10-30.
 
 ### 4.7 CI
 
-A new path-filtered workflow `julia.yml` triggers on `julia/**`, `conformance/**`, `flatland/envs/**` and
-`flatland/core/**`:
+A path-filtered workflow `julia.yml` triggers on `julia/**` and on the exporters of the conformance data
+(`tests/conformance/**`). A cheap `conformance.yml` re-runs those exporters whenever `flatland/**`, the exporters or
+the data change, and fails if the committed data is stale.
 
 - **Test matrix:** Julia `lts`, `1` and `pre` on ubuntu; macOS and Windows on `1`.
   - Steps: `julia-actions/setup-julia@v3`, `julia-actions/cache@v3`, `julia-buildpkg` and `julia-runtest` with
     `project: julia/Flatland`, `julia-processcoverage` with `directories: julia/Flatland/src`, Codecov.
-- **Lower compat bounds:** `julia-actions/julia-downgrade-compat@v2` with `projects: julia/Flatland`.
+- **Lower compat bounds:** `julia-actions/julia-downgrade-compat@v2` with `projects: julia/Flatland,julia/Flatland/test`
+  and `mode: forcedeps`, then the tests run from that resolved environment, since `Pkg.test` re-resolves split test
+  environments before Julia 1.12.
 - **Formatting check** (Runic).
 - **Docs:** built with `julia/Flatland/docs` as project, and `deploydocs(dirname = "julia", tag_prefix = "Flatland-")`
   so that the docs land in a subfolder of `gh-pages` and TagBot's subdirectory tags deploy versioned docs.
@@ -760,12 +766,11 @@ A new path-filtered workflow `julia.yml` triggers on `julia/**`, `conformance/**
 - **Version tags:** TagBot names subdirectory tags `Flatland-v0.1.0`. setuptools-scm's default `tag_regex` accepts a
   `Name-` prefix ([docs](https://setuptools-scm.readthedocs.io/en/latest/config/)), and `[tool.setuptools_scm]` is
   empty here (`pyproject.toml:128`). A Julia tag could therefore become the Python package's version. Before the
-  first Julia tag:
-  - set `scm.git.describe_command` to match `v[0-9]*` only, which needs setuptools-scm ≥ 9.2 (9.0 and 9.1 are
-    yanked), or `tag = {prefix = "v"}`, which needs ≥ 10.1. So bump `[build-system]`'s `setuptools_scm>=8`. Tags
-    `v4.3.0` then `Flatland-v0.1.0` gave the Python version `0.1.1.dev1` today (reproduced);
-  - exclude `julia/` from release-please's root package (`exclude-paths`);
-  - exclude `julia/` from the Python sdist, which otherwise includes the git-tracked tree.
+  first Julia tag, set `scm.git.describe_command` to match `v[0-9]*` only, which needs setuptools-scm ≥ 9.2 (9.0 and
+  9.1 are yanked), or `tag = {prefix = "v"}`, which needs ≥ 10.1. So bump `[build-system]`'s `setuptools_scm>=8`.
+  Tags `v4.3.0` then `Flatland-v0.1.0` gave the Python version `0.1.1.dev1` today (reproduced). M1 already excludes
+  `julia/` from release-please's root package (`exclude-paths`) and from the Python sdist (`MANIFEST.in`), which
+  otherwise includes the git-tracked tree.
 
 ### 4.8 Documentation
 
