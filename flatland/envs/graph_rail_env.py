@@ -26,10 +26,12 @@ TimetableGenerator = Callable[[List[EnvAgent], GraphDistanceMap, dict, RandomSta
 class GraphRailEnv(AbstractRailEnv[GraphTransitionMap, GraphResourceMap, str]):
     @staticmethod
     def from_rail_env(rail_env: RailEnv, observation_builder: ObservationBuilder, seed: Optional[int] = None,
-                      rewards: Rewards = None) -> "GraphRailEnv":
+                      rewards: Rewards = None, check_step_pre_post_conditions: Optional[bool] = None) -> "GraphRailEnv":
         """
         Parameters
         ----------
+        check_step_pre_post_conditions: bool, optional
+            see `AbstractRailEnv`; defaults to `rail_env`'s own setting.
         rewards: Rewards, optional
             the `Rewards` instance for `graph_env` to accumulate its own reward state into - must be a
             separate instance from `rail_env.rewards` (never the same object: `Rewards` accumulates
@@ -57,6 +59,9 @@ class GraphRailEnv(AbstractRailEnv[GraphTransitionMap, GraphResourceMap, str]):
             timetable_generator=lambda *args, **kwargs: timetable,
             seed=seed,
             rewards=rewards,
+            check_step_pre_post_conditions=(
+                rail_env.check_step_pre_post_conditions if check_step_pre_post_conditions is None else check_step_pre_post_conditions
+            ),
         )
         GraphRailEnv._warn_if_rewards_mismatch(rail_env, graph_env)
         # TODO https://github.com/flatland-association/flatland-rl/pull/341 hack while awaiting this pr
@@ -113,6 +118,7 @@ class GraphRailEnv(AbstractRailEnv[GraphTransitionMap, GraphResourceMap, str]):
         seed: Optional[int] = None,
         rewards: Rewards = None,
         skip_state_machine_update: bool = True,
+        check_step_pre_post_conditions: Optional[bool] = None,
     ) -> "GraphRailEnv":
         """
         Factory method to create a `GraphRailEnv` directly from a string-node graph and string-based
@@ -145,6 +151,8 @@ class GraphRailEnv(AbstractRailEnv[GraphTransitionMap, GraphResourceMap, str]):
             flow, and `get_info_dict()`'s `state`/`action_required` fields, are unaffected either way (both
             derived via `EnvAgent.derived_state()`). Pass `False` only if a caller needs `agent.state`/
             `agent.state_machine` themselves (real state-machine semantics).
+        check_step_pre_post_conditions: bool, optional
+            see `AbstractRailEnv`.
         """
         timetable_generator, agent_speeds = GraphRailEnv._resolve_from_graph_defaults(
             timetable_generator, agent_speeds, agent_waypoints)
@@ -159,6 +167,7 @@ class GraphRailEnv(AbstractRailEnv[GraphTransitionMap, GraphResourceMap, str]):
             observation_builder=observation_builder,
             malfunction_generator=malfunction_generator,
             rewards=rewards,
+            check_step_pre_post_conditions=check_step_pre_post_conditions,
         )
         if not skip_state_machine_update:
             graph_env = RailEnvStateMachineWrapper(graph_env)
@@ -197,7 +206,8 @@ class GraphRailEnv(AbstractRailEnv[GraphTransitionMap, GraphResourceMap, str]):
         braking_delta=-1.0,
         rewards: Rewards = None,
         effects_generator: EffectsGenerator["GraphRailEnv"] = None,
-        distance_map: GraphDistanceMap = None
+        distance_map: GraphDistanceMap = None,
+        check_step_pre_post_conditions: Optional[bool] = None,
     ):
         if observation_builder is None:
             observation_builder = DummyObservationBuilder()
@@ -215,6 +225,7 @@ class GraphRailEnv(AbstractRailEnv[GraphTransitionMap, GraphResourceMap, str]):
             rewards=rewards,
             effects_generator=effects_generator,
             distance_map=GraphDistanceMap([]) if distance_map is None else distance_map,
+            check_step_pre_post_conditions=check_step_pre_post_conditions,
         )
         self.agents = [EnvAgent(None, None, None) for i in range(self.get_num_agents())]
 
