@@ -19,4 +19,7 @@ using Test
     @testset verbose = true "Topology" begin
         include("topology.jl")
     end
+    @testset verbose = true "Candidates" begin
+        include("candidates.jl")
+    end
 end

@@ -34,5 +34,10 @@ jobs:
                     PYTHONPATH: ${{ github.workspace }}
                     MPLBACKEND: Agg
                 run: python tests/conformance/export_topology.py julia/Flatland/test/data/topology.json
+            -   name: Export the collect phase's candidates
+                env:
+                    PYTHONPATH: ${{ github.workspace }}
+                    MPLBACKEND: Agg
+                run: python tests/conformance/export_candidates.py julia/Flatland/test/data/candidates.json
             -   name: Compare with the committed data
                 run: git diff --exit-code --stat julia/Flatland/test/data
