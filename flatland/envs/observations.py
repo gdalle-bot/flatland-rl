@@ -10,9 +10,8 @@ from flatland.core.env import Environment
 from flatland.core.env_observation_builder import ObservationBuilder, AgentHandle
 from flatland.core.env_prediction_builder import PredictionBuilder
 from flatland.core.grid.grid4_utils import get_new_position
-from flatland.core.grid.grid_utils import coordinate_to_position
 from flatland.envs.agent_utils import EnvAgent, virtual_entry_point
-from flatland.envs.fast_methods import fast_argmax, fast_count_nonzero, fast_position_equal, fast_delete, fast_where
+from flatland.envs.fast_methods import fast_argmax, fast_count_nonzero, fast_position_equal
 from flatland.envs.step_utils.states import TrainState
 from flatland.utils.ordered_set import OrderedSet
 
@@ -68,22 +67,7 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
         if handles is None:
             handles = []
         if self.predictor:
-            self.max_prediction_depth = 0
-            self.predicted_pos = {}
-            self.predicted_dir = {}
             self.predictions = self.predictor.get()
-            if self.predictions:
-                for t in range(self.predictor.max_depth + 1):
-                    pos_list = []
-                    dir_list = []
-                    for a in handles:
-                        if self.predictions[a] is None:
-                            continue
-                        pos_list.append(self.predictions[a][t][1:3])
-                        dir_list.append(self.predictions[a][t][3])
-                    self.predicted_pos.update({t: coordinate_to_position(self.env.width, pos_list)})
-                    self.predicted_dir.update({t: dir_list})
-                self.max_prediction_depth = len(self.predicted_pos)
         # Update local lookup table for all agents' positions
         # ignore other agents not in the grid (only status active and done)
         # self.location_has_agent = {tuple(agent.current_entry_point[0]): 1 for agent in self.env.agents if
@@ -149,11 +133,7 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
             if another agent is detected, the distance in number of cells from current agent position is stored
 
         #4:
-            possible conflict detected
-            tot_dist = Other agent predicts to pass along this cell at the same time as the agent,
-             the distance in number of cells from current agent position is stored
-
-            0 = No other agent reserves the same cell at the same time
+            possible conflict detected: not computed, always inf (0 at the root node)
 
         #5:
             if an unusable switch (for agent) is detected we store the distance
@@ -321,51 +301,9 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
 
                 # Check number of possible transitions for agent and total number of transitions in cell (type)
             cell_transitions = self.env.rail.get_transitions((position, direction))
-            transition_bit = bin(self.env.rail.get_full_transitions(*position))
-            total_transitions = transition_bit.count("1")
-            crossing_found = False
-            if int(transition_bit, 2) == int('1000010000100001', 2):
-                crossing_found = True
-
-            # Register possible future conflict
-            predicted_time = int(tot_dist * time_per_cell)
-            if self.predictor and predicted_time < self.max_prediction_depth:
-                int_position = coordinate_to_position(self.env.width, [position])
-                if tot_dist < self.max_prediction_depth:
-
-                    pre_step = max(0, predicted_time - 1)
-                    post_step = min(self.max_prediction_depth - 1, predicted_time + 1)
-
-                    # Look for conflicting paths at distance tot_dist
-                    if int_position in fast_delete(self.predicted_pos[predicted_time], handle):
-                        conflicting_agent = fast_where(self.predicted_pos[predicted_time] == int_position)
-                        for ca in conflicting_agent:
-                            if direction != self.predicted_dir[predicted_time][ca] and cell_transitions[
-                                self._reverse_dir(
-                                    self.predicted_dir[predicted_time][ca])] == 1 and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
-                            if self.env.agents[ca].derived_state() == TrainState.DONE and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
-                    # Look for conflicting paths at distance num_step-1
-                    elif int_position in fast_delete(self.predicted_pos[pre_step], handle):
-                        conflicting_agent = fast_where(self.predicted_pos[pre_step] == int_position)
-                        for ca in conflicting_agent:
-                            if direction != self.predicted_dir[pre_step][ca] \
-                                and cell_transitions[self._reverse_dir(self.predicted_dir[pre_step][ca])] == 1 \
-                                and tot_dist < potential_conflict:  # noqa: E125
-                                potential_conflict = tot_dist
-                            if self.env.agents[ca].derived_state() == TrainState.DONE and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
-                    # Look for conflicting paths at distance num_step+1
-                    elif int_position in fast_delete(self.predicted_pos[post_step], handle):
-                        conflicting_agent = fast_where(self.predicted_pos[post_step] == int_position)
-                        for ca in conflicting_agent:
-                            if direction != self.predicted_dir[post_step][ca] and cell_transitions[self._reverse_dir(
-                                self.predicted_dir[post_step][ca])] == 1 \
-                                and tot_dist < potential_conflict:  # noqa: E125
-                                potential_conflict = tot_dist
-                            if self.env.agents[ca].derived_state() == TrainState.DONE and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
+            full_transitions = int(self.env.rail.get_full_transitions(*position))
+            total_transitions = full_transitions.bit_count()
+            crossing_found = full_transitions == 0b1000010000100001
 
             if position in self.location_has_target and position != agent_target:
                 if tot_dist < other_target_encountered:
