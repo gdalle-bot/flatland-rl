@@ -1,17 +1,19 @@
 """
-    SpeedProfile(max_speed::Rational, acceleration_delta::Rational, braking_delta::Rational)
+    SpeedProfile(max_speed, acceleration_delta, braking_delta)
 
 The speed parameters of one agent, in integer ticks. A cell is `ticks_per_cell` ticks long: the least common multiple
 of the denominators of the three arguments. Every speed and distance the agent can reach is then a whole number of
 ticks, so the rational arithmetic of the Python package (`fractions.Fraction`) becomes integer arithmetic.
 
 `acceleration_delta` and `braking_delta` are the env's parameters of the same names; `braking_delta` is
-non-positive in practice (`-1` by default).
+non-positive in practice (`-1` by default). The arguments are `Integer`s or `Rational`s. Floats are not accepted,
+since most decimal speeds (e.g. `0.33`) are not exact binary fractions: convert them first, as the Python package's
+`_pseudo_fractional` does (`0.33` becomes `1//3`). Throws an `ArgumentError` unless `0 <= max_speed <= 1`.
 
 # Fields
 
 - `ticks_per_cell::Int`
-- `max_speed::Int`
+- `max_speed::Int`, in `0:ticks_per_cell`
 - `acceleration::Int`: `acceleration_delta` in ticks
 - `braking::Int`: `braking_delta` in ticks
 """
@@ -20,24 +22,32 @@ struct SpeedProfile
     max_speed::Int
     acceleration::Int
     braking::Int
+    function SpeedProfile(ticks_per_cell::Integer, max_speed::Integer, acceleration::Integer, braking::Integer)
+        ticks_per_cell > 0 || throw(ArgumentError("ticks_per_cell must be positive, got $ticks_per_cell"))
+        0 <= max_speed <= ticks_per_cell ||
+            throw(ArgumentError("max_speed must be between 0 and 1 cell per step, got $max_speed // $ticks_per_cell"))
+        return new(ticks_per_cell, max_speed, acceleration, braking)
+    end
 end
 
-function SpeedProfile(max_speed::Rational, acceleration_delta::Rational, braking_delta::Rational)
-    max_speed <= 1 || throw(ArgumentError("max_speed must be at most 1 cell per step, got $max_speed"))
+# exact numbers of cells
+const Exact = Union{Integer, Rational}
+
+function SpeedProfile(max_speed::Exact, acceleration_delta::Exact, braking_delta::Exact)
     n = lcm(denominator(max_speed), denominator(acceleration_delta), denominator(braking_delta))
-    return SpeedProfile(n, to_ticks(n, max_speed), to_ticks(n, acceleration_delta), to_ticks(n, braking_delta))
+    return SpeedProfile(n, exact_ticks(n, max_speed), exact_ticks(n, acceleration_delta), exact_ticks(n, braking_delta))
 end
 
 """
-    to_ticks(profile::SpeedProfile, x::Rational)
+    to_ticks(profile::SpeedProfile, x)
 
-The speed or distance `x` (in cells) as a whole number of ticks of `profile`, `nothing` for `nothing` (off the map).
-Throws an `InexactError` if `x` is not a multiple of a tick.
+The speed or distance `x` (in cells, an `Integer` or a `Rational`) as a whole number of ticks of `profile`, `nothing`
+for `nothing` (off the map). Throws an `InexactError` if `x` is not a multiple of a tick.
 """
-to_ticks(profile::SpeedProfile, x) = to_ticks(profile.ticks_per_cell, x)
+to_ticks(profile::SpeedProfile, x::Union{Exact, Nothing}) = exact_ticks(profile.ticks_per_cell, x)
 
-to_ticks(::Integer, ::Nothing) = nothing
-function to_ticks(ticks_per_cell::Integer, x::Rational)
+exact_ticks(::Integer, ::Nothing) = nothing
+function exact_ticks(ticks_per_cell::Integer, x::Exact)
     t = x * ticks_per_cell
     isinteger(t) || throw(InexactError(:to_ticks, Int, x))
     return Int(t)

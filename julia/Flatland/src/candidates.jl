@@ -12,7 +12,8 @@ and are only meaningful while the agent is on the map (`None` in Python while it
 - `next_entry_point::Int32`: the entry point the agent moves to when it leaves its cell, `0` while off the map
 - `initial_entry_point::Int32`: where the agent enters the map
 - `done::Bool`: whether the agent reached its target in an earlier step
-- `in_malfunction::Bool`
+- `in_malfunction::Bool`: as read by the collect phase, after this step's malfunction counter update and new
+  malfunctions
 - `speed::Int`, `distance::Int`: ignored while off the map
 - `earliest_departure::Int`: the first step at which the agent may enter the map
 """
@@ -61,7 +62,8 @@ The [`Candidate`](@ref) of `agent` for `action`, as computed by the collect phas
   `agent.initial_entry_point` off the map, ignoring other agents ([`next_entry_point`](@ref)); `0` if `action` is
   invalid there
 - `next_is_target::Bool`: whether `agent.next_entry_point` is one of the agent's targets
-- `elapsed_steps::Integer`: the number of steps elapsed in the episode
+- `elapsed_steps::Integer`: the env's step counter as the collect phase reads it, already incremented for this step
+  (`1` in the first step)
 - `remove_agents_at_target::Bool`: the env parameter of the same name
 
 The three parts of the candidate follow the case analysis of `design_by_contract.md` (Table 1), one function each.
