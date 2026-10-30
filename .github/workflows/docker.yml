@@ -38,6 +38,11 @@ jobs:
                     -   name: ml
                         with-ml: true
                         tag-suffix: "-ml"
+        # Granted explicitly: the called workflow's jobs cannot get more than its caller, and the
+        # repository default token may be read-only (e.g. on forks).
+        permissions:
+            contents: read
+            packages: write
         uses: ./.github/workflows/build-docker-image.yml
         with:
             python-version: ${{ matrix.python-version }}
