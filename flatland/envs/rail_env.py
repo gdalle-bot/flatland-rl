@@ -75,13 +75,35 @@ class PreStepSnapshot(NamedTuple):
 CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR = "FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS"
 
 
+_CHECK_STEP_PRE_POST_CONDITIONS_ON = ("1", "true", "yes", "on")
+_CHECK_STEP_PRE_POST_CONDITIONS_OFF = ("", "0", "false", "no", "off")
+
+
 def default_check_step_pre_post_conditions() -> bool:
     """
-    Default for `check_step_pre_post_conditions` when the constructor argument is `None`: on if the environment
-    variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` is `1`, `true` or `yes` (case-insensitive), off otherwise.
-    The test suite turns it on (`tests/conftest.py`).
+    Default for `check_step_pre_post_conditions` when the constructor argument is `None`, read from the environment
+    variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS`. pytest runs in this repository set it (repository-root
+    `conftest.py`).
+
+    Returns
+    -------
+    bool
+        `True` if the variable is `1`, `true`, `yes` or `on`, `False` if it is unset, empty, `0`, `false`, `no` or `off`
+        (case-insensitive, surrounding whitespace ignored).
+
+    Raises
+    ------
+    ValueError
+        If the variable has any other value.
     """
-    return os.environ.get(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, "").strip().lower() in ("1", "true", "yes")
+    value = os.environ.get(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, "")
+    normalized = value.strip().lower()
+    if normalized in _CHECK_STEP_PRE_POST_CONDITIONS_ON:
+        return True
+    if normalized in _CHECK_STEP_PRE_POST_CONDITIONS_OFF:
+        return False
+    raise ValueError(f"{CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR}={value!r}: expected one of "
+                     f"{'/'.join(_CHECK_STEP_PRE_POST_CONDITIONS_ON[:4])} or {'/'.join(_CHECK_STEP_PRE_POST_CONDITIONS_OFF[1:])}")
 
 
 class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPointT]):
@@ -163,10 +185,9 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
         Determines how much speed is decreased by STOP_MOVING action.
         As speed is between 0.0 and 1.0, braking_delta=-1.0 restores to previous full stop behaviour.
     check_step_pre_post_conditions : Optional[bool]
-        Whether step() checks its pre- and postconditions. They verify every agent's update and add about 40-50% to
-        the cost of a step without observations. `None` (default) defers to `default_check_step_pre_post_conditions()`,
-        i.e. the environment variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS`, which is unset (off) unless set
-        explicitly. The test suite turns it on.
+        Whether step() checks its pre- and postconditions, a correctness net that verifies every agent's update and
+        makes a step noticeably slower. `None` (default) defers to `default_check_step_pre_post_conditions()`, i.e. to
+        the environment variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` (off when unset).
     rewards : DefaultRewards
         The rewards function to use. Defaults to standard settings of Flatland 3 behaviour.
     effects_generator : Optional[EffectsGenerator["RailEnv"]]
