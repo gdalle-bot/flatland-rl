@@ -127,9 +127,9 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
     number_of_agents : int
         Number of agents to spawn on the map. Potentially in the future,
         a range of number of agents to sample from.
-    obs_builder_object: Optional[ObservationBuilder]
+    obs_builder_object: ObservationBuilder
         ObservationBuilder-derived object that builds observation
-        vectors for each agent. Defaults to a new `GlobalObsForRailEnv` for this env.
+        vectors for each agent.
     malfunction_generator_and_process_data : Tuple["MalfunctionGenerator","MalfunctionProcessData"]
         Deprecated. Use `malfunction_generator` option instead.
     malfunction_generator: "MalfunctionGenerator"
@@ -174,7 +174,7 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
                  rail_generator: "RailGenerator" = None,
                  line_generator: "LineGenerator" = None,
                  number_of_agents=2,
-                 obs_builder_object: Optional[ObservationBuilder] = None,
+                 obs_builder_object: ObservationBuilder = GlobalObsForRailEnv(),
                  malfunction_generator_and_process_data=None,
                  malfunction_generator: "MalfunctionGenerator" = None,
                  remove_agents_at_target=True,
@@ -218,8 +218,6 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
 
         self.remove_agents_at_target = remove_agents_at_target
 
-        if obs_builder_object is None:
-            obs_builder_object = GlobalObsForRailEnv()
         self.obs_builder = obs_builder_object
 
         self._max_episode_steps: Optional[int] = None
@@ -1602,7 +1600,7 @@ class RailEnv(AbstractRailEnv[GridTransitionMap, GridResourceMap, Tuple[Tuple[in
                  rail_generator: "RailGenerator" = None,
                  line_generator: "LineGenerator" = None,
                  number_of_agents=2,
-                 obs_builder_object: Optional[ObservationBuilder] = None,
+                 obs_builder_object: ObservationBuilder = GlobalObsForRailEnv(),
                  malfunction_generator_and_process_data=None,
                  malfunction_generator: "MalfunctionGenerator" = None,
                  remove_agents_at_target=True,
