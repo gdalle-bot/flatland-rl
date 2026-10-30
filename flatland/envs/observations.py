@@ -2,7 +2,7 @@
 Collection of environment-specific ObservationBuilder.
 """
 import collections
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, NamedTuple, Tuple
 
 import numpy as np
 
@@ -10,9 +10,8 @@ from flatland.core.env import Environment
 from flatland.core.env_observation_builder import ObservationBuilder, AgentHandle
 from flatland.core.env_prediction_builder import PredictionBuilder
 from flatland.core.grid.grid4_utils import get_new_position
-from flatland.core.grid.grid_utils import coordinate_to_position
-from flatland.envs.agent_utils import EnvAgent, virtual_entry_point
-from flatland.envs.fast_methods import fast_argmax, fast_count_nonzero, fast_position_equal, fast_delete, fast_where
+from flatland.envs.agent_utils import virtual_entry_point
+from flatland.envs.fast_methods import fast_argmax, fast_count_nonzero, fast_position_equal
 from flatland.envs.step_utils.states import TrainState
 from flatland.utils.ordered_set import OrderedSet
 
@@ -68,22 +67,7 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
         if handles is None:
             handles = []
         if self.predictor:
-            self.max_prediction_depth = 0
-            self.predicted_pos = {}
-            self.predicted_dir = {}
             self.predictions = self.predictor.get()
-            if self.predictions:
-                for t in range(self.predictor.max_depth + 1):
-                    pos_list = []
-                    dir_list = []
-                    for a in handles:
-                        if self.predictions[a] is None:
-                            continue
-                        pos_list.append(self.predictions[a][t][1:3])
-                        dir_list.append(self.predictions[a][t][3])
-                    self.predicted_pos.update({t: coordinate_to_position(self.env.width, pos_list)})
-                    self.predicted_dir.update({t: dir_list})
-                self.max_prediction_depth = len(self.predicted_pos)
         # Update local lookup table for all agents' positions
         # ignore other agents not in the grid (only status active and done)
         # self.location_has_agent = {tuple(agent.current_entry_point[0]): 1 for agent in self.env.agents if
@@ -149,11 +133,7 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
             if another agent is detected, the distance in number of cells from current agent position is stored
 
         #4:
-            possible conflict detected
-            tot_dist = Other agent predicts to pass along this cell at the same time as the agent,
-             the distance in number of cells from current agent position is stored
-
-            0 = No other agent reserves the same cell at the same time
+            possible conflict detected: not computed, always inf (0 at the root node)
 
         #5:
             if an unusable switch (for agent) is detected we store the distance
@@ -277,8 +257,6 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
         agent_target = next(iter(agent.targets))[0]
         distance_map_handle = self.env.distance_map.get()[handle]
 
-        # assume constant max_speed
-        time_per_cell = 1.0 / agent.speed_counter.max_speed
         own_target_encountered = np.inf
         other_agent_encountered = np.inf
         other_target_encountered = np.inf
@@ -321,51 +299,9 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
 
                 # Check number of possible transitions for agent and total number of transitions in cell (type)
             cell_transitions = self.env.rail.get_transitions((position, direction))
-            transition_bit = bin(self.env.rail.get_full_transitions(*position))
-            total_transitions = transition_bit.count("1")
-            crossing_found = False
-            if int(transition_bit, 2) == int('1000010000100001', 2):
-                crossing_found = True
-
-            # Register possible future conflict
-            predicted_time = int(tot_dist * time_per_cell)
-            if self.predictor and predicted_time < self.max_prediction_depth:
-                int_position = coordinate_to_position(self.env.width, [position])
-                if tot_dist < self.max_prediction_depth:
-
-                    pre_step = max(0, predicted_time - 1)
-                    post_step = min(self.max_prediction_depth - 1, predicted_time + 1)
-
-                    # Look for conflicting paths at distance tot_dist
-                    if int_position in fast_delete(self.predicted_pos[predicted_time], handle):
-                        conflicting_agent = fast_where(self.predicted_pos[predicted_time] == int_position)
-                        for ca in conflicting_agent:
-                            if direction != self.predicted_dir[predicted_time][ca] and cell_transitions[
-                                self._reverse_dir(
-                                    self.predicted_dir[predicted_time][ca])] == 1 and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
-                            if self.env.agents[ca].derived_state() == TrainState.DONE and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
-                    # Look for conflicting paths at distance num_step-1
-                    elif int_position in fast_delete(self.predicted_pos[pre_step], handle):
-                        conflicting_agent = fast_where(self.predicted_pos[pre_step] == int_position)
-                        for ca in conflicting_agent:
-                            if direction != self.predicted_dir[pre_step][ca] \
-                                and cell_transitions[self._reverse_dir(self.predicted_dir[pre_step][ca])] == 1 \
-                                and tot_dist < potential_conflict:  # noqa: E125
-                                potential_conflict = tot_dist
-                            if self.env.agents[ca].derived_state() == TrainState.DONE and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
-                    # Look for conflicting paths at distance num_step+1
-                    elif int_position in fast_delete(self.predicted_pos[post_step], handle):
-                        conflicting_agent = fast_where(self.predicted_pos[post_step] == int_position)
-                        for ca in conflicting_agent:
-                            if direction != self.predicted_dir[post_step][ca] and cell_transitions[self._reverse_dir(
-                                self.predicted_dir[post_step][ca])] == 1 \
-                                and tot_dist < potential_conflict:  # noqa: E125
-                                potential_conflict = tot_dist
-                            if self.env.agents[ca].derived_state() == TrainState.DONE and tot_dist < potential_conflict:
-                                potential_conflict = tot_dist
+            full_transitions = self.env.rail.get_full_transitions(*position)
+            total_transitions = full_transitions.bit_count()
+            crossing_found = full_transitions == 0b1000010000100001
 
             if position in self.location_has_target and position != agent_target:
                 if tot_dist < other_target_encountered:
@@ -523,11 +459,16 @@ class TreeObsForRailEnv(ObservationBuilder["RailEnv", Node]):
         for direction in self.tree_explored_actions_char:
             self.print_subtree(node.childs[direction], direction, indent + "\t")
 
-    def _reverse_dir(self, direction):
-        return int((direction + 2) % 4)
+
+class _GlobalObsSharedLayers(NamedTuple):
+    """The parts of `GlobalObsForRailEnv`'s observation that do not depend on the observing agent."""
+    agents_state: np.ndarray
+    targets: np.ndarray
+    # per cell, the (handle, direction) of the agents on it that wrote the second channel, in handle order
+    writers: Dict[Tuple[int, int], List[Tuple[int, int]]]
 
 
-class GlobalObsForRailEnv(ObservationBuilder["RailEnv", Tuple[np.ndarray, np.ndarray, np.ndarray]]):
+class GlobalObsForRailEnv(ObservationBuilder["RailEnv", Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]]):
     """
     Gives a global observation of the entire rail environment.
     The observation is composed of the following elements:
@@ -544,6 +485,10 @@ class GlobalObsForRailEnv(ObservationBuilder["RailEnv", Tuple[np.ndarray, np.nda
 
         - obs_targets: Two 2D arrays (map_height, map_width, 2) containing respectively the position of the given agent\
          target and the positions of the other agents targets (flag only, no counter!).
+
+    The transition map array is the same object for all agents and all steps of an episode: do not modify it in place.
+    `get_many()` builds the layers that do not depend on the observing agent once, and gives each agent its own copy
+    with its own cells set.
     """
 
     def __init__(self):
@@ -551,15 +496,53 @@ class GlobalObsForRailEnv(ObservationBuilder["RailEnv", Tuple[np.ndarray, np.nda
 
     def reset(self, env: Environment):
         super().reset(env)
-        self.rail_obs = np.zeros((self.env.height, self.env.width, 16))
-        for i in range(self.rail_obs.shape[0]):
-            for j in range(self.rail_obs.shape[1]):
-                bitlist = [int(digit) for digit in bin(self.env.rail.get_full_transitions(i, j))[2:]]
-                bitlist = [0] * (16 - len(bitlist)) + bitlist
-                self.rail_obs[i, j] = np.array(bitlist)
+        grid = np.asarray(self.env.rail.grid, dtype=np.int64)
+        assert grid.size == 0 or (grid.min() >= 0 and grid.max() < 1 << 16), "cell transitions must be 16-bit codes"
+        # bit 15 (most significant) first, like bin()
+        self.rail_obs = ((grid[:, :, None] >> np.arange(15, -1, -1)) & 1).astype(float)
 
-    def get(self, handle: AgentHandle = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def get_many(self, handles: Optional[List[AgentHandle]] = None) -> Dict[AgentHandle, Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]]:
+        if type(self).get is not GlobalObsForRailEnv.get:
+            # a subclass customizes get(): build each observation through it, as ObservationBuilder.get_many does
+            return super().get_many(handles)
+        if handles is None:
+            handles = []
+        shared = self._shared_layers()
+        return {h: self._get(h, shared) for h in handles}
 
+    def get(self, handle: AgentHandle = 0) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        return self._get(handle, self._shared_layers())
+
+    def _shared_layers(self) -> _GlobalObsSharedLayers:
+        """
+        One pass over the agents: every channel of `obs_agents_state` except the first, and the second channel of
+        `obs_targets`.
+        """
+        obs_targets = np.zeros((self.env.height, self.env.width, 2))
+        obs_agents_state = np.zeros((self.env.height, self.env.width, 5)) - 1
+        obs_agents_state[:, :, 4] = 0
+        writers: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+        for i, other_agent in enumerate(self.env.agents):
+            other_state = other_agent.derived_state(self.env._elapsed_steps)
+            # ignore other agents not in the grid any more
+            if other_state == TrainState.DONE:
+                continue
+            obs_targets[next(iter(other_agent.targets))[0]][1] = 1
+            # second to fourth channel only if in the grid
+            if other_agent.current_entry_point is not None:
+                other_agent_position, other_agent_direction = other_agent.current_entry_point
+                obs_agents_state[other_agent_position][1] = other_agent_direction
+                writers.setdefault(other_agent_position, []).append((i, other_agent_direction))
+                obs_agents_state[other_agent_position][2] = other_agent.malfunction_handler.malfunction_down_counter
+                obs_agents_state[other_agent_position][3] = other_agent.speed_counter.speed
+            # fifth channel: all ready to depart on this position
+            if other_state.is_off_map_state():
+                obs_agents_state[other_agent.initial_entry_point[0]][4] += 1
+        assert np.isfinite(obs_agents_state).all(), obs_agents_state
+        assert np.isfinite(obs_targets).all(), obs_targets
+        return _GlobalObsSharedLayers(agents_state=obs_agents_state, targets=obs_targets, writers=writers)
+
+    def _get(self, handle: AgentHandle, shared: _GlobalObsSharedLayers) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         agent = self.env.agents[handle]
         agent_target = next(iter(agent.targets))[0]
         entry_point = virtual_entry_point(agent)
@@ -567,40 +550,18 @@ class GlobalObsForRailEnv(ObservationBuilder["RailEnv", Tuple[np.ndarray, np.nda
             return None
         agent_virtual_position, agent_virtual_direction = entry_point
 
-        obs_targets = np.zeros((self.env.height, self.env.width, 2))
-        obs_agents_state = np.zeros((self.env.height, self.env.width, 5)) - 1
-
-        obs_agents_state[:, :, 4] = 0
-
+        obs_agents_state = shared.agents_state.copy()
+        obs_targets = shared.targets.copy()
         obs_agents_state[agent_virtual_position][0] = agent_virtual_direction if agent_virtual_direction is not None else -1
         obs_targets[agent_target][0] = 1
 
-        for i in range(len(self.env.agents)):
-            other_agent: EnvAgent = self.env.agents[i]
-
-            # ignore other agents not in the grid any more
-            if other_agent.derived_state() == TrainState.DONE:
-                continue
-
-            obs_targets[next(iter(other_agent.targets))[0]][1] = 1
-
-            # second to fourth channel only if in the grid
-            if other_agent.current_entry_point is not None:
-                other_agent_position = other_agent.current_entry_point[0]
-                # second channel only for other agents
-                if i != handle:
-                    obs_agents_state[other_agent_position][1] = other_agent.current_entry_point[1]
-                obs_agents_state[other_agent_position][2] = other_agent.malfunction_handler.malfunction_down_counter
-                obs_agents_state[other_agent_position][3] = other_agent.speed_counter.speed
-            # fifth channel: all ready to depart on this position
-            if other_agent.derived_state(self.env._elapsed_steps).is_off_map_state():
-                obs_agents_state[other_agent.initial_entry_point[0]][4] += 1
-        assert np.count_nonzero(~np.isfinite(self.rail_obs)) == 0, self.rail_obs
-        assert np.count_nonzero(np.isnan(self.rail_obs)) == 0, self.rail_obs
-        assert np.count_nonzero(~np.isfinite(obs_agents_state)) == 0, obs_agents_state
-        assert np.count_nonzero(np.isnan(obs_agents_state)) == 0, obs_agents_state
-        assert np.count_nonzero(~np.isfinite(obs_targets)) == 0, obs_targets
-        assert np.count_nonzero(np.isnan(obs_targets)) == 0, obs_targets
+        # second channel only for other agents: where this agent was the last to write its own cell, restore the
+        # direction of the last other agent on that cell, or -1 if there is none
+        if agent.current_entry_point is not None:
+            own_position = agent.current_entry_point[0]
+            own_writers = shared.writers.get(own_position, ())
+            if own_writers and own_writers[-1][0] == handle:
+                obs_agents_state[own_position][1] = own_writers[-2][1] if len(own_writers) > 1 else -1
         return self.rail_obs, obs_agents_state, obs_targets
 
 

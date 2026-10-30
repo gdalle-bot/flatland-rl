@@ -15,6 +15,16 @@ cache_size_42_43_42 = env_42_cache_size + env_43_cache_size + env_42_cache_size
 cache_size_42_43 = env_42_cache_size + env_43_cache_size
 
 
+def _query_all_cells(env):
+    """
+    Query every cell's transitions once, right after reset, so that the cache counts below do not depend on which cells
+    the observation builder reads at reset.
+    """
+    for r in range(env.height):
+        for c in range(env.width):
+            env.rail.get_full_transitions(r, c)
+
+
 def test_lru_load():
     # avoid side effects from other tests
     _clear_all_lru_caches()
@@ -25,6 +35,7 @@ def test_lru_load():
                      line_generator=sparse_line_generator(), number_of_agents=2, random_seed=42)
     assert _info_lru_cache() == (0, 0, maxsize, 0)
     env_42.reset(random_seed=42)
+    _query_all_cells(env_42)
     assert _info_lru_cache() == (env_42_hits, env_42_cache_size, maxsize, env_42_cache_size)
     transitions_42 = {}
     for r in range(30):
@@ -42,6 +53,7 @@ def test_lru_load():
                      line_generator=sparse_line_generator(), number_of_agents=2, random_seed=43)
     assert _info_lru_cache() == (env_42_hits + grid_size, env_42_cache_size, maxsize, env_42_cache_size)
     env_43.reset(random_seed=43)
+    _query_all_cells(env_43)
     assert _info_lru_cache() == (env_42_hits + grid_size + env_43_hits, 2245, maxsize, 2245)
 
     transitions_43 = {}
@@ -58,6 +70,7 @@ def test_lru_load():
                          line_generator=sparse_line_generator(), number_of_agents=2, random_seed=42)
     assert _info_lru_cache() == (env_42_hits + grid_size + env_43_hits + grid_size, cache_size_42_43, maxsize, cache_size_42_43)
     env_42_bis.reset(random_seed=42)
+    _query_all_cells(env_42_bis)
     assert _info_lru_cache() == (env_42_hits + grid_size + env_43_hits + grid_size + env_42_hits, cache_size_42_43_42, maxsize,
                                  cache_size_42_43_42)
 
@@ -76,6 +89,7 @@ def test_lru_load():
                      rail_generator=_sparse_rail_generator_legacy(seed=2),
                      line_generator=sparse_line_generator(), number_of_agents=2, random_seed=43)
     env_43.reset(random_seed=43)
+    _query_all_cells(env_43)
 
     assert _info_lru_cache() == (
         env_42_hits + grid_size + env_43_hits + grid_size + env_42_hits + grid_size + env_43_hits,
@@ -118,6 +132,7 @@ def test_lru_load_new():
                      line_generator=sparse_line_generator(), number_of_agents=2, random_seed=42)
     assert _info_lru_cache() == (0, 0, maxsize, 0)
     env_42.reset(random_seed=42)
+    _query_all_cells(env_42)
     assert _info_lru_cache() == (env_42_hits, env_42_cache_size, maxsize, env_42_cache_size)
     transitions_42 = {}
     for r in range(30):
@@ -135,6 +150,7 @@ def test_lru_load_new():
                      line_generator=sparse_line_generator(), number_of_agents=2, random_seed=43)
     assert _info_lru_cache() == (env_42_hits + grid_size, env_42_cache_size, maxsize, env_42_cache_size)
     env_43.reset(random_seed=43)
+    _query_all_cells(env_43)
     assert _info_lru_cache() == (env_42_hits + grid_size + env_43_hits, cache_size_42_43, maxsize, cache_size_42_43)
     transitions_43 = {}
     for r in range(30):
@@ -150,6 +166,8 @@ def test_lru_load_new():
                          line_generator=sparse_line_generator(), number_of_agents=2, random_seed=42)
 
     env_42_bis.reset(random_seed=42)
+
+    _query_all_cells(env_42_bis)
     assert _info_lru_cache() == (
         env_42_hits + grid_size + env_43_hits + grid_size + env_42_hits, cache_size_42_43_42, maxsize, cache_size_42_43_42)
     transitions_42_bis = {}
@@ -165,6 +183,7 @@ def test_lru_load_new():
                      rail_generator=_sparse_rail_generator_legacy(seed=2),
                      line_generator=sparse_line_generator(), number_of_agents=2, random_seed=43)
     env_43.reset(random_seed=43)
+    _query_all_cells(env_43)
 
     assert _info_lru_cache() == (
         env_42_hits + grid_size + env_43_hits + grid_size + env_42_hits + grid_size + env_43_hits, cache_size_42_43_42_43, maxsize, cache_size_42_43_42_43)
