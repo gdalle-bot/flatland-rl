@@ -306,12 +306,13 @@ class BaseDefaultRewards(Rewards[Dict[str, float]], Generic[EntryPointT]):
                                                                    agent.get_current_delay(elapsed_steps, distance_map))
         agent_waypoints = self._sanitize_waypoints(agent.waypoints)
         for intermediate_alternatives, la, ed in self._intermediate_waypoints(agent_waypoints, agent):
-            agent_arrivals: Set[EntryPointT] = set(self.arrivals[agent.handle])
-            intermediate_alternatives: Set[EntryPointT] = set(intermediate_alternatives)
-            wps_intersection: Set[EntryPointT] = intermediate_alternatives.intersection(agent_arrivals)
             # a station may consist of several halting cells (alternative waypoints);
-            # the stop is served iff the train stopped at any of them
-            stopped_wps: Set[EntryPointT] = wps_intersection.intersection(self.stopped_waypoints[agent.handle])
+            # the stop is served iff the train stopped at any of them. They are taken in the order the agent's line
+            # lists them, so that ties between them do not depend on the iteration order of a set.
+            stopped_wps: List[EntryPointT] = [
+                wp for wp in dict.fromkeys(intermediate_alternatives)
+                if wp in self.arrivals[agent.handle] and wp in self.stopped_waypoints[agent.handle]
+            ]
             if len(stopped_wps) == 0:
                 # stop not served or served but not stopped
                 d[DefaultPenalties.INTERMEDIATE_NOT_SERVED.value] += -1 * self.intermediate_not_served_penalty
@@ -320,7 +321,7 @@ class BaseDefaultRewards(Rewards[Dict[str, float]], Generic[EntryPointT]):
                 earlies = []
                 # take best time window (minimum penalty sum) over all halting cells and all arrival/departures;
                 # cells merely rolled through without stopping do not provide a serving time window
-                for wp in list(stopped_wps):
+                for wp in stopped_wps:
                     # `+ [None]` is for arrival but no departure
                     for arrival, departure in zip(self.arrivals[agent.handle][wp], self.departures[agent.handle][wp] + [None]):
                         # late arrival
