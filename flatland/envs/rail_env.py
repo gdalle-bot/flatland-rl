@@ -1,6 +1,7 @@
 """
 Definition of the RailEnv environment.
 """
+import os
 import pickle
 import random
 import warnings
@@ -71,6 +72,40 @@ class PreStepSnapshot(NamedTuple):
     agents: Dict[int, PreStepAgentSnapshot]
 
 
+CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR = "FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS"
+
+
+_CHECK_STEP_PRE_POST_CONDITIONS_ON = ("1", "true", "yes", "on")
+_CHECK_STEP_PRE_POST_CONDITIONS_OFF = ("", "0", "false", "no", "off")
+
+
+def default_check_step_pre_post_conditions() -> bool:
+    """
+    Default for `check_step_pre_post_conditions` when the constructor argument is `None`, read from the environment
+    variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS`. pytest runs in this repository set it (repository-root
+    `conftest.py`).
+
+    Returns
+    -------
+    bool
+        `True` if the variable is `1`, `true`, `yes` or `on`, `False` if it is unset, empty, `0`, `false`, `no` or `off`
+        (case-insensitive, surrounding whitespace ignored).
+
+    Raises
+    ------
+    ValueError
+        If the variable has any other value.
+    """
+    value = os.environ.get(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, "")
+    normalized = value.strip().lower()
+    if normalized in _CHECK_STEP_PRE_POST_CONDITIONS_ON:
+        return True
+    if normalized in _CHECK_STEP_PRE_POST_CONDITIONS_OFF:
+        return False
+    raise ValueError(f"{CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR}={value!r}: expected one of "
+                     f"{'/'.join(_CHECK_STEP_PRE_POST_CONDITIONS_ON[:4])} or {'/'.join(_CHECK_STEP_PRE_POST_CONDITIONS_OFF[1:])}")
+
+
 class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPointT]):
     """
     AbstractRailEnv environment class.
@@ -127,9 +162,9 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
     number_of_agents : int
         Number of agents to spawn on the map. Potentially in the future,
         a range of number of agents to sample from.
-    obs_builder_object: ObservationBuilder
+    obs_builder_object: Optional[ObservationBuilder]
         ObservationBuilder-derived object that builds observation
-        vectors for each agent.
+        vectors for each agent. Defaults to a new `GlobalObsForRailEnv` for this env.
     malfunction_generator_and_process_data : Tuple["MalfunctionGenerator","MalfunctionProcessData"]
         Deprecated. Use `malfunction_generator` option instead.
     malfunction_generator: "MalfunctionGenerator"
@@ -149,8 +184,10 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
     braking_delta : float
         Determines how much speed is decreased by STOP_MOVING action.
         As speed is between 0.0 and 1.0, braking_delta=-1.0 restores to previous full stop behaviour.
-    check_step_pre_post_conditions : bool
-        Set to False to skip checking step() pre- and postconditions, e.g. in performance-sensitive production use.
+    check_step_pre_post_conditions : Optional[bool]
+        Whether step() checks its pre- and postconditions, a correctness net that verifies every agent's update and
+        makes a step noticeably slower. `None` (default) defers to `default_check_step_pre_post_conditions()`, i.e. to
+        the environment variable `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` (off when unset).
     rewards : DefaultRewards
         The rewards function to use. Defaults to standard settings of Flatland 3 behaviour.
     effects_generator : Optional[EffectsGenerator["RailEnv"]]
@@ -174,7 +211,7 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
                  rail_generator: "RailGenerator" = None,
                  line_generator: "LineGenerator" = None,
                  number_of_agents=2,
-                 obs_builder_object: ObservationBuilder = GlobalObsForRailEnv(),
+                 obs_builder_object: Optional[ObservationBuilder] = None,
                  malfunction_generator_and_process_data=None,
                  malfunction_generator: "MalfunctionGenerator" = None,
                  remove_agents_at_target=True,
@@ -182,7 +219,7 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
                  timetable_generator=ttg.timetable_generator,
                  acceleration_delta: Fraction = Fraction(1),
                  braking_delta: Fraction = -Fraction(1),
-                 check_step_pre_post_conditions: bool = True,
+                 check_step_pre_post_conditions: Optional[bool] = None,
                  rewards: Rewards = None,
                  effects_generator: EffectsGenerator["RailEnv"] = None,
                  distance_map: AgentSourceTargetDistanceMap = None,
@@ -218,6 +255,8 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
 
         self.remove_agents_at_target = remove_agents_at_target
 
+        if obs_builder_object is None:
+            obs_builder_object = GlobalObsForRailEnv()
         self.obs_builder = obs_builder_object
 
         self._max_episode_steps: Optional[int] = None
@@ -249,6 +288,8 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
 
         self.acceleration_delta = acceleration_delta
         self.braking_delta = braking_delta
+        if check_step_pre_post_conditions is None:
+            check_step_pre_post_conditions = default_check_step_pre_post_conditions()
         self.check_step_pre_post_conditions = check_step_pre_post_conditions
 
         mf = mfg.MalfunctionEffectsGenerator(self.malfunction_generator)
@@ -437,16 +478,14 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
         this episode's initial) position/speed have already settled - see `derived_state()`'s own
         docstring for the general safe/unsafe timing distinction.
         """
-        info_dict = {
-            'action_required': {i: RailEnv.action_required(agent.derived_state(self._elapsed_steps), agent.speed_counter.is_cell_exit())
-                                for i, agent in enumerate(self.agents)},
-            'malfunction': {
-                i: agent.malfunction_handler.malfunction_down_counter for i, agent in enumerate(self.agents)
-            },
-            'speed': {i: agent.speed_counter.speed for i, agent in enumerate(self.agents)},
-            'state': {i: agent.derived_state(self._elapsed_steps) for i, agent in enumerate(self.agents)}
-        }
-        return info_dict
+        action_required, malfunction, speed, state = {}, {}, {}, {}
+        for i, agent in enumerate(self.agents):
+            agent_state = agent.derived_state(self._elapsed_steps)
+            action_required[i] = RailEnv.action_required(agent_state, agent.speed_counter.is_cell_exit())
+            malfunction[i] = agent.malfunction_handler.malfunction_down_counter
+            speed[i] = agent.speed_counter.speed
+            state[i] = agent_state
+        return {'action_required': action_required, 'malfunction': malfunction, 'speed': speed, 'state': state}
 
     def end_of_episode_update(self, have_all_agents_ended):
         """
@@ -587,7 +626,6 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
 
         # (3) STATE TRANSITION SIGNALS
         in_malfunction = agent.malfunction_handler.in_malfunction
-        state = agent.state
 
         # (4) CANDIDATE ENTRY POINT: action validity - need both by speed update (5) and position update (6) below
         # mid cell or valid transition (only invalid actions are non-L/R on symmetric switches) -
@@ -701,7 +739,7 @@ class AbstractRailEnv(Environment, Generic[TransitionMapT, ResourceMapT, EntryPo
             if not valid_position_direction:
                 infra = self._infrastructure_representation(agent.current_entry_point)
                 warnings.warn(f"{candidate_entry_point} not valid on the grid."
-                              f" Coming from {agent.current_entry_point if state.is_on_map_state() else initial_entry_point} with action {action}"
+                              f" Coming from {agent.current_entry_point if agent.state.is_on_map_state() else initial_entry_point} with action {action}"
                               f" and action valid {action_valid}. {infra}")
             # fails if initial position has invalid direction or if the grid is not closed
             # assert valid_position_direction
@@ -1600,7 +1638,7 @@ class RailEnv(AbstractRailEnv[GridTransitionMap, GridResourceMap, Tuple[Tuple[in
                  rail_generator: "RailGenerator" = None,
                  line_generator: "LineGenerator" = None,
                  number_of_agents=2,
-                 obs_builder_object: ObservationBuilder = GlobalObsForRailEnv(),
+                 obs_builder_object: Optional[ObservationBuilder] = None,
                  malfunction_generator_and_process_data=None,
                  malfunction_generator: "MalfunctionGenerator" = None,
                  remove_agents_at_target=True,
@@ -1609,7 +1647,7 @@ class RailEnv(AbstractRailEnv[GridTransitionMap, GridResourceMap, Tuple[Tuple[in
                  timetable_generator=ttg.timetable_generator,
                  acceleration_delta=1.0,
                  braking_delta=-1.0,
-                 check_step_pre_post_conditions: bool = True,
+                 check_step_pre_post_conditions: Optional[bool] = None,
                  rewards: Rewards = None,
                  effects_generator: EffectsGenerator["RailEnv"] = None
                  ):

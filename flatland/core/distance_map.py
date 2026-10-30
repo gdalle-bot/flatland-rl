@@ -1,6 +1,6 @@
 import math
 from fractions import Fraction
-from typing import Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 from flatland.core.entry_point_distance_map import (
     EntryPointDistanceMap,
@@ -11,7 +11,12 @@ from flatland.core.entry_point_distance_map import (
 )
 from flatland.core.distance_map_walker import DistanceMapWalker
 from flatland.envs.agent_utils import EnvAgent
-from flatland.envs.step_utils.states import TrainState
+
+
+class _NextHop(NamedTuple):
+    """The smallest distance among an entry point's successors, and the first successor with that distance."""
+    distance: float
+    entry_point: Optional[Any]
 
 
 class AgentSourceTargetDistanceMap(
@@ -29,16 +34,53 @@ class AgentSourceTargetDistanceMap(
         self.distance_map = None
         self.agents_previous_computation = None
         self.reset_was_called = False
+        # agent handle -> handle whose distance row it is a copy of (see _compute); empty if unknown
+        self._row_key_of: Dict[int, int] = {}
+        self._clear_shortest_path_memo()
+
+    # attributes of the shortest-path memo, left out of pickles
+    _MEMO_ATTRIBUTES = ("_next_hop_memo", "_waypoint_memo", "_memo_rail_uuid", "_memo_distance_map")
+
+    def __getstate__(self) -> Dict[str, Any]:
+        """
+        The pickled state, without the shortest-path memo, which is rebuilt on demand.
+        """
+        state = self.__dict__.copy()
+        for name in self._MEMO_ATTRIBUTES:
+            state.pop(name, None)
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]):
+        """
+        Restore a pickled state, including one pickled before the shortest-path memo existed.
+        """
+        self.__dict__.update(state)
+        self.__dict__.setdefault("_row_key_of", {})
+        self._clear_shortest_path_memo()
+
+    def _clear_shortest_path_memo(self):
+        """
+        Forget the memoized next hops and waypoints of `_reconstruct_shortest_path`. Called whenever the distance
+        rows or the rail they refer to may have changed: `set`, `reset` and `_compute`.
+        """
+        self._next_hop_memo: Dict[Tuple[int, EntryPointT], _NextHop] = {}
+        self._waypoint_memo: Dict[EntryPointT, WaypointT] = {}
+        self._memo_rail_uuid = None
+        # the distance rows the memo refers to
+        self._memo_distance_map = self.distance_map
 
     def set(self, distance_map: DistanceMapT):
         """
-        Set the distance map
+        Set the distance map. This is the only way to change the distances: the shortest paths are memoized, so
+        writing into the object returned by `get()` is not supported.
         """
         self.distance_map = distance_map
+        self._row_key_of = {}
+        self._clear_shortest_path_memo()
 
     def get(self) -> DistanceMapT:
         """
-        Get the distance map
+        Get the distance map, computing it if needed. Treat it as read-only and change it with `set()`.
         """
         if self.reset_was_called:
             self.reset_was_called = False
@@ -62,6 +104,7 @@ class AgentSourceTargetDistanceMap(
         """
         super().reset(agents=agents, rail=rail)
         self.reset_was_called = True
+        self._clear_shortest_path_memo()
 
     def _compute(self, agents: List[EnvAgent], rail: TransitionMapT):
         """
@@ -70,6 +113,8 @@ class AgentSourceTargetDistanceMap(
         """
         self.agents_previous_computation = self.agents
         self.distance_map = self._new_distance_map(len(agents))
+        self._row_key_of = {}
+        self._clear_shortest_path_memo()
         distance_map_walker = DistanceMapWalker(self)
         computed_targets = []
         for i, agent in enumerate(agents):
@@ -82,9 +127,12 @@ class AgentSourceTargetDistanceMap(
                         default=math.inf
                     )
                     self._set_geometric_distance(entry_point, i, new_distance)
+                self._row_key_of[i] = i
             else:
                 # just copy the distance map from other agent with same target (performance)
-                self._copy_agent_distance(i, computed_targets.index(targets))
+                source = computed_targets.index(targets)
+                self._copy_agent_distance(i, source)
+                self._row_key_of[i] = self._row_key_of[source]
             computed_targets.append(targets)
 
     def _new_distance_map(self, num_agents: int) -> DistanceMapT:
@@ -133,13 +181,13 @@ class AgentSourceTargetDistanceMap(
         return shortest_paths
 
     def _shortest_path_for_agent(self, agent: EnvAgent, max_depth: Optional[int] = None):
-        if agent.derived_state().is_off_map_state():
+        state = agent.derived_state()
+        if state.is_off_map_state():
             entry_point = agent.initial_entry_point
-        elif agent.derived_state().is_on_map_state():
+        elif state.is_on_map_state():
             entry_point = agent.current_entry_point
-        elif agent.derived_state() == TrainState.DONE:
-            return None
         else:
+            # DONE
             return None
         handle = agent.handle
         targets = agent.targets
@@ -162,15 +210,14 @@ class AgentSourceTargetDistanceMap(
         depth = 0
 
         while source not in targets and (max_depth is None or depth < max_depth):
+            # The successor taken is the first one with the smallest distance, provided that distance is below the
+            # previous step's (inf before the first step).
+            successor_distance, successor = self._next_hop(source, handle)
             best_next_entry_point = None
-            next_entry_points = self.rail.get_successor_entry_points(source)
-            for next_entry_point in next_entry_points:
-
-                next_action_distance = self.geometric_distance(next_entry_point, handle)
-                if next_action_distance < distance:
-                    distance = next_action_distance
-                    best_next_entry_point = next_entry_point
-            agent_shortest_path.append(self.waypoint_init(source))
+            if successor_distance < distance:
+                distance = successor_distance
+                best_next_entry_point = successor
+            agent_shortest_path.append(self._waypoint(source))
             depth += 1
 
             # if there is no way to continue, the rail must be disconnected!
@@ -179,8 +226,42 @@ class AgentSourceTargetDistanceMap(
                 return None
             source = best_next_entry_point
         if max_depth is None or depth < max_depth:
-            agent_shortest_path.append(self.waypoint_init(source))
+            agent_shortest_path.append(self._waypoint(source))
         return agent_shortest_path
+
+    def _next_hop(self, source: EntryPointT, handle: int) -> _NextHop:
+        """
+        The smallest distance to `handle`'s targets among `source`'s successors, and the first successor (in
+        `get_successor_entry_points` order) with that distance. The successor is `None` if no successor has a
+        distance below infinity. Memoized per distance row: agents whose rows are copies of each other (same
+        targets) share entries.
+        """
+        self.get()
+        if self.distance_map is not self._memo_distance_map:
+            # the distance rows were replaced without `set()`
+            self._row_key_of = {}
+            self._clear_shortest_path_memo()
+        rail_uuid = getattr(self.rail, "uuid", None)
+        if rail_uuid != self._memo_rail_uuid:
+            self._next_hop_memo = {}
+            self._memo_rail_uuid = rail_uuid
+        key = (self._row_key_of.get(handle, handle), source)
+        hop = self._next_hop_memo.get(key)
+        if hop is None:
+            smallest, best = math.inf, None
+            for next_entry_point in self.rail.get_successor_entry_points(source):
+                next_distance = self._geometric_distance(next_entry_point, handle)
+                if next_distance < smallest:
+                    smallest, best = next_distance, next_entry_point
+            hop = _NextHop(distance=smallest, entry_point=best)
+            self._next_hop_memo[key] = hop
+        return hop
+
+    def _waypoint(self, entry_point: EntryPointT) -> WaypointT:
+        waypoint = self._waypoint_memo.get(entry_point)
+        if waypoint is None:
+            waypoint = self._waypoint_memo[entry_point] = self.waypoint_init(entry_point)
+        return waypoint
 
     def geometric_distance(self, source_entry_point: EntryPointT, target_nr: int):
         """

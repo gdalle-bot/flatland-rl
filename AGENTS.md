@@ -240,10 +240,15 @@ correctness net verifying every per-agent speed/distance/position update and res
 matches exactly what the action/state-machine/motion-check outcome implies, not part of normal control flow.
 Since these live in `AbstractRailEnv` itself (not a subclass override), `RailEnv` and `GraphRailEnv` both run
 them identically - `RailEnv.step()`'s own override only adds `_update_agent_positions_map()` after calling
-`super().step()`. All are gated behind the `check_step_pre_post_conditions` constructor flag (default `True`)
-so the extra per-step overhead can be disabled where it matters - `examples/flatland_performance_profiling.py`'s
-`get_rail_env()` defaults it to `False`, since that script exists specifically to profile `step()`'s own
-cumulative time and the assertions would otherwise inflate every measurement.
+`super().step()`. All are gated behind the `check_step_pre_post_conditions` constructor flag (`RailEnv`,
+`GraphRailEnv` and its factories; `GraphRailEnv.from_rail_env` follows the source env by default). Its default
+`None` defers to the `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` environment variable
+(`default_check_step_pre_post_conditions()`: `1`/`true`/`yes`/`on` turn the checks on, unset/`0`/`false`/`no`/`off`
+leave them off, anything else raises), so the checks are off by default: they make a step without observations
+noticeably slower. The repository-root `conftest.py` sets the variable for every pytest run in this repository
+(including `pytest benchmarks/benchmark_episodes.py`), and the tox `examples`/`notebooks` envs set it too since
+they run outside pytest. `examples/flatland_performance_profiling.py`'s `get_rail_env()` passes `False`
+explicitly, since that script exists specifically to profile `step()`'s own cumulative time.
 
 `_check_position_update_postconditions`/`_check_speed_distance_speedup_postconditions` branch purely on position
 (`current_entry_point is None`) and resource/malfunction/action outcomes, never on `agent.state` - the
@@ -397,6 +402,13 @@ how `step()`, `TrainStateMachine`, or `MotionCheck` internally arrive at that ou
   bare `pytest` invocation from the repo root, not just the dedicated benchmark envs.
 - `scripts/make_coverage.py` — runs the suite under `coverage`, generates an HTML report, opens it in a browser
   (same as `tox -e coverage`).
+- `julia/Flatland/` — the Julia package `Flatland.jl`, a port of the simulator that must reproduce the Python
+  trajectories exactly (work in progress, see `REVAMP.md` §4). It is a separate package with its own `Project.toml`,
+  tests and docs, and its own CI (`.github/workflows/julia.yml`, triggered by changes under `julia/`). It is not part
+  of the Python package: `MANIFEST.in` prunes it from the sdist, and release-please ignores it. Run its tests with
+  `julia --project=julia/Flatland -e 'using Pkg; Pkg.test()'`; format with Runic, installed once with
+  `julia --project=@runic -e 'using Pkg; Pkg.add("Runic")'`
+  (`julia --project=@runic -e 'using Runic; exit(Runic.main(["--inplace", "julia"]))'`).
 
 ### CLI entry points (`pyproject.toml`'s `[project.scripts]`, implemented in `cli.py`)
 

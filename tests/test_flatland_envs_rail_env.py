@@ -21,7 +21,8 @@ from flatland.envs.malfunction_generators import ParamMalfunctionGen, Malfunctio
 from flatland.envs.observations import GlobalObsForRailEnv, TreeObsForRailEnv
 from flatland.envs.persistence import RailEnvPersister
 from flatland.envs.predictions import ShortestPathPredictorForRailEnv
-from flatland.envs.rail_env import RailEnv, RailEnvActions
+from flatland.envs.graph_rail_env import GraphRailEnv
+from flatland.envs.rail_env import CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, RailEnv, RailEnvActions, default_check_step_pre_post_conditions
 from flatland.envs.rail_env_state_machine_wrapper import RailEnvStateMachineWrapper
 from flatland.envs.rail_generators import rail_from_grid_transition_map
 from flatland.envs.rail_generators import sparse_rail_generator, rail_from_file
@@ -2732,3 +2733,123 @@ def test_railenvwrapper_matches_unwrapped_control_flow(seed):
             break
 
     assert any_real_state_diverged_from_derived_fallback
+
+
+@pytest.mark.parametrize(
+    "env_value, explicit, expected",
+    [
+        (None, None, False),
+        ("", None, False),
+        ("0", None, False),
+        ("false", None, False),
+        ("OFF", None, False),
+        ("1", None, True),
+        ("TRUE", None, True),
+        (" yes ", None, True),
+        ("on", None, True),
+        ("1", False, False),
+        ("0", True, True),
+        (None, True, True),
+    ],
+)
+def test_check_step_pre_post_conditions_default(monkeypatch, env_value, explicit, expected):
+    """
+    `check_step_pre_post_conditions` defaults to the `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` environment variable
+    (on for 1/true/yes/on, off when unset or 0/false/no/off), and an explicit constructor argument always wins over it.
+    """
+    if env_value is None:
+        monkeypatch.delenv(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, env_value)
+    kwargs = {} if explicit is None else {"check_step_pre_post_conditions": explicit}
+    env = RailEnv(width=30, height=30, **kwargs)
+    assert env.check_step_pre_post_conditions is expected
+
+
+@pytest.mark.parametrize("env_value", ["2", "enabled", "y"])
+def test_check_step_pre_post_conditions_invalid_env_value(monkeypatch, env_value):
+    """Any other value of `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` is rejected when an env relies on the default."""
+    monkeypatch.setenv(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR, env_value)
+    with pytest.raises(ValueError, match=CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR):
+        RailEnv(width=30, height=30)
+    assert RailEnv(width=30, height=30, check_step_pre_post_conditions=True).check_step_pre_post_conditions is True
+
+
+def test_conftest_sets_step_checks_env_var():
+    """
+    The repository-root conftest.py sets `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` (to 1 unless it is set already), and
+    envs built without the argument follow it.
+    """
+    assert os.environ.get(CHECK_STEP_PRE_POST_CONDITIONS_ENV_VAR)
+    assert RailEnv(width=30, height=30).check_step_pre_post_conditions is default_check_step_pre_post_conditions()
+
+
+def _step_records(check_step_pre_post_conditions):
+    env = RailEnv(
+        width=30, height=30, number_of_agents=7, random_seed=1,
+        rail_generator=sparse_rail_generator(max_num_cities=3, p_level_free=0.5),
+        line_generator=sparse_line_generator({1.: .5, 1. / 3.: .5}),
+        malfunction_generator=ParamMalfunctionGen(MalfunctionParameters(malfunction_rate=1 / 20, min_duration=2, max_duration=5)),
+        obs_builder_object=DummyObservationBuilder(),
+        check_step_pre_post_conditions=check_step_pre_post_conditions,
+    )
+    _, info = env.reset(random_seed=1)
+    rng = np.random.default_rng(0)
+    records = [info]
+    for _ in range(120):
+        _, rewards, dones, info = env.step({a: int(rng.integers(0, 5)) for a in env.get_agent_handles()})
+        records.append((rewards, dones, info, [(a.current_entry_point, a.speed_counter.speed, a.speed_counter.distance,
+                                                a.malfunction_handler.malfunction_down_counter) for a in env.agents]))
+        if dones["__all__"]:
+            break
+    return records
+
+
+def test_step_checks_do_not_change_trajectory():
+    """
+    Seven agents with speeds 1 and 1/3 and frequent malfunctions on a 30x30 sparse rail with level-free crossings follow
+    the same seeded random actions for up to 120 steps, once with the step checks on and once off.
+    - Every step's rewards, dones, infos and every agent's entry point, speed, distance and malfunction counter are equal.
+    """
+    assert _step_records(True) == _step_records(False)
+
+
+@pytest.mark.parametrize("source_checks", [True, False])
+def test_graph_rail_env_step_checks_follow_source_env(source_checks):
+    """
+    A GraphRailEnv converted from a RailEnv with the step checks on (or off) has them on (or off) too, unless
+    `check_step_pre_post_conditions` is passed explicitly.
+    """
+    env = RailEnv(width=30, height=30, number_of_agents=2, random_seed=1, obs_builder_object=DummyObservationBuilder(),
+                  check_step_pre_post_conditions=source_checks)
+    env.reset(random_seed=1)
+    assert GraphRailEnv.from_rail_env(env, DummyObservationBuilder(), seed=1).check_step_pre_post_conditions is source_checks
+    explicit = GraphRailEnv.from_rail_env(env, DummyObservationBuilder(), seed=1, check_step_pre_post_conditions=not source_checks)
+    assert explicit.check_step_pre_post_conditions is (not source_checks)
+
+
+@pytest.mark.parametrize("builder_kwargs", [{}, {"obs_builder_object": None}], ids=["omitted", "none"])
+def test_default_observation_builder_is_not_shared_between_envs(builder_kwargs):
+    """
+    Two envs on 30x30 sparse rails with different seeds, both built without an observation builder (the argument
+    omitted, or passed as `None`).
+    - Setup: reset the first env, then the second.
+    - Each env has its own `GlobalObsForRailEnv`, still bound to that env after the other one was reset.
+    - After a step with no actions, the first env's rail layer equals that of a separate `GlobalObsForRailEnv` reset on
+      the first env, and differs from the second env's.
+    """
+    env1 = RailEnv(width=30, height=30, number_of_agents=2, random_seed=1, **builder_kwargs)
+    env2 = RailEnv(width=30, height=30, number_of_agents=2, random_seed=2, **builder_kwargs)
+    env1.reset(random_seed=1)
+    env2.reset(random_seed=2)
+    assert isinstance(env1.obs_builder, GlobalObsForRailEnv)
+    assert isinstance(env2.obs_builder, GlobalObsForRailEnv)
+    assert env1.obs_builder is not env2.obs_builder
+    assert env1.obs_builder.env is env1
+    assert env2.obs_builder.env is env2
+    obs1, _, _, _ = env1.step({})
+    reference1, reference2 = GlobalObsForRailEnv(), GlobalObsForRailEnv()
+    reference1.reset(env1)
+    reference2.reset(env2)
+    assert np.array_equal(obs1[0][0], reference1.rail_obs)
+    assert not np.array_equal(obs1[0][0], reference2.rail_obs)
