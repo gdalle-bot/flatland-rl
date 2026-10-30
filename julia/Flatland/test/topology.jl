@@ -22,6 +22,11 @@ end
     @test length(TOPOLOGY["check_action"]) > 100
 end
 
+function allocations_of_next_entry_point(net, i)
+    next_entry_point(net, i, MOVE_FORWARD)
+    return @allocated next_entry_point(net, i, MOVE_FORWARD)
+end
+
 @testset "Entry point network matches Python (rail $(rail["seed"]), p_level_free=$(rail["p_level_free"]))" for rail in TOPOLOGY["rails"]
     grid = Int.(permutedims(reduce(hcat, rail["grid"])))
     net = EntryPointNetwork(GridRail(grid, Tuple{Int, Int}[(p[1], p[2]) for p in rail["level_free"]]))
@@ -53,8 +58,7 @@ end
         @test net.resource[entry_point_index(net, r, c, 0)] == net.resource[entry_point_index(net, r, c, 2)]
     end
 
-    i = findfirst(net.valid)
-    @test (@allocated next_entry_point(net, i, MOVE_FORWARD)) == 0
+    @test allocations_of_next_entry_point(net, findfirst(net.valid)) == 0
 end
 
 @testset "Type stability" begin
