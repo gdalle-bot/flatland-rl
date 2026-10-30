@@ -53,6 +53,11 @@ jobs:
             fail-fast: false
             matrix:
                 python-version: [ "3.11", "3.12", "3.13", "3.14" ]
+        # Granted explicitly: the called workflow's jobs cannot get more than its caller, and the
+        # repository default token may be read-only (e.g. on forks).
+        permissions:
+            contents: read
+            packages: write
         uses: ./.github/workflows/build-ci-env.yml
         with:
             python-version: ${{ matrix.python-version }}
@@ -75,6 +80,11 @@ jobs:
             fail-fast: false
             matrix:
                 python-version: [ "3.11", "3.12", "3.13", "3.14" ]
+        # Granted explicitly: the called workflow's jobs cannot get more than its caller, and the
+        # repository default token may be read-only (e.g. on forks).
+        permissions:
+            contents: read
+            packages: read
         uses: ./.github/workflows/run-ci-env-test.yml
         with:
             python-version: ${{ matrix.python-version }}
@@ -232,6 +242,11 @@ jobs:
                     -   name: ml
                         with-ml: true
                         tag-suffix: "-ml"
+        # Granted explicitly: the called workflow's jobs cannot get more than its caller, and the
+        # repository default token may be read-only (e.g. on forks).
+        permissions:
+            contents: read
+            packages: write
         uses: ./.github/workflows/build-docker-image.yml
         with:
             python-version: ${{ matrix.python-version }}
