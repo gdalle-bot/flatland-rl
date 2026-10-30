@@ -1,12 +1,13 @@
 name: Julia
 
-# CI for the Julia package in julia/Flatland (see REVAMP.md). Runs only when the Julia package or this workflow changes.
+# CI for the Julia package in julia/Flatland (see REVAMP.md). Runs only when the Julia package, the Python scripts that
+# export its conformance data, or this workflow change.
 on:
     push:
         branches: [ "main" ]
-        paths: [ "julia/**", ".github/workflows/julia.yml" ]
+        paths: [ "julia/**", "tests/conformance/**", ".github/workflows/julia.yml" ]
     pull_request:
-        paths: [ "julia/**", ".github/workflows/julia.yml" ]
+        paths: [ "julia/**", "tests/conformance/**", ".github/workflows/julia.yml" ]
     workflow_dispatch:
 
 concurrency:
