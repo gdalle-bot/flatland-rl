@@ -2,11 +2,10 @@ using Flatland
 using Flatland: Candidate, PreStepAgent, candidate
 using Flatland: cap_speed, distance_after_crossing, distance_without_crossing, is_cell_exit
 using JET: JET
-using JSON: JSON
 using Test
 
-# exported from the Python package by tests/conformance/export_candidates.py
-const CANDIDATES = JSON.parsefile(joinpath(@__DIR__, "data", "candidates.json"))
+# computed by the Python package, see tests/conformance/candidate_cases.py
+const CANDIDATES = julia_data(python_module("tests.conformance.candidate_cases").candidate_data())
 
 const TABLE_1_ROWS = [
     "Done", "Target reached", "Malfunction", "Map entry", "Stay off map", "On-map cell transition",

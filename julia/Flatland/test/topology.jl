@@ -1,11 +1,10 @@
 using Flatland
 using Flatland: ALL_ACTIONS
 using JET: JET
-using JSON: JSON
 using Test
 
-# exported from the Python package by tests/conformance/export_topology.py
-const TOPOLOGY = JSON.parsefile(joinpath(@__DIR__, "data", "topology.json"))
+# computed by the Python package, see tests/conformance/topology_cases.py
+const TOPOLOGY = julia_data(python_module("tests.conformance.topology_cases").topology_data())
 
 @test TOPOLOGY["entry_point_fields"] == ["r", "c", "d", "valid", "next", "successors", "resource"]
 

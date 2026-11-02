@@ -4,6 +4,8 @@ using Flatland
 using JET: JET
 using Test
 
+include("python.jl")
+
 @testset verbose = true "Flatland.jl" begin
     @testset verbose = true "Code quality" begin
         @testset "Aqua" begin

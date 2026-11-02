@@ -1,16 +1,21 @@
 name: Julia
 
-# CI for the Julia package in julia/Flatland (see REVAMP.md). Runs only when the Julia package, the Python scripts that
-# export its conformance data, or this workflow change.
+# CI for the Julia package in julia/Flatland (see REVAMP.md). Its tests compare it with the Python package of the same
+# checkout, run in-process, so they run when either package changes.
 on:
     push:
         branches: [ "main", "revamp" ]
         # tags of the Julia package, for the docs of each release (path filters do not apply to tags)
         tags: [ "Flatland-v*" ]
-        paths: [ "julia/**", "tests/conformance/**", ".github/workflows/julia.yml" ]
+        paths: [ "julia/**", "flatland/**", "tests/conformance/**", "requirements.txt", ".github/workflows/julia.yml" ]
     pull_request:
-        paths: [ "julia/**", "tests/conformance/**", ".github/workflows/julia.yml" ]
+        paths: [ "julia/**", "flatland/**", "tests/conformance/**", "requirements.txt", ".github/workflows/julia.yml" ]
     workflow_dispatch:
+
+env:
+    # PythonCall uses the interpreter of JULIA_PYTHONCALL_EXE instead of installing one with Conda
+    # (quoted: an unquoted Null is a YAML null)
+    JULIA_CONDAPKG_BACKEND: "Null"
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,6 +48,17 @@ jobs:
                 with:
                     version: ${{ matrix.version }}
             -   uses: julia-actions/cache@v3
+            -   uses: actions/setup-python@v6
+                with:
+                    python-version: "3.13"
+                    cache: pip
+                    cache-dependency-path: requirements.txt
+            # the tests import the Python package from the checkout, with PythonCall using this interpreter
+            -   name: Install the Python package's dependencies
+                shell: bash
+                run: |
+                    python -m pip install -r requirements.txt
+                    echo "JULIA_PYTHONCALL_EXE=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
             -   uses: julia-actions/julia-buildpkg@v1
                 with:
                     project: julia/Flatland
@@ -72,6 +88,17 @@ jobs:
                 with:
                     version: lts
             -   uses: julia-actions/cache@v3
+            -   uses: actions/setup-python@v6
+                with:
+                    python-version: "3.13"
+                    cache: pip
+                    cache-dependency-path: requirements.txt
+            # the tests import the Python package from the checkout, with PythonCall using this interpreter
+            -   name: Install the Python package's dependencies
+                shell: bash
+                run: |
+                    python -m pip install -r requirements.txt
+                    echo "JULIA_PYTHONCALL_EXE=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
             # resolve the package and its test environment at the lower bounds of their compat entries, and fail if a
             # dependency resolves above its lower bound
             -   uses: julia-actions/julia-downgrade-compat@v2

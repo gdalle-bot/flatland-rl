@@ -745,9 +745,8 @@ The versions are the latest in the General registry as of 2026-10-30.
 | layer | what | tools |
 |---|---|---|
 | unit | port the transition, speed, MotionCheck and reward unit tests (`test_flatland_core_transitions.py`, `test_speed_counter.py`, `test_agent_chains.py`, `test_rewards.py`) | `@testset` |
-| tables | `EntryPointNetwork` against Python, exhaustively: every cell type × 4 headings × 5 actions, plus off-grid neighbours | golden JSON |
-| conformance | every `flatland-trace/1` trace replays bit-identically, comparing rationals exactly (stricter than the Python tests' `np.allclose`) | golden traces from CI |
-| differential | fuzz MotionCheck (about 10⁵ random configurations including swaps, chains and level-free crossings), then whole episodes, against the live Python implementation | PythonCall.jl with the CI's own Python (no Conda, see §4.4), nightly |
+| tables | `EntryPointNetwork` against Python, exhaustively: every cell type × 4 headings × 5 actions, plus off-grid neighbours | PythonCall.jl |
+| differential | fuzz MotionCheck (about 10⁵ random configurations including swaps, chains and level-free crossings), then whole episodes step by step, comparing rationals exactly (stricter than the Python tests' `np.allclose`), against the Python package of the same checkout, run in-process | PythonCall.jl with the CI's own Python (no Conda, see §4.4) |
 | properties | invariants of the Python check net: at most one agent per resource except level-free crossings, speed ≤ max speed, distance in [0, 1], done agents off map | Supposition.jl |
 | quality | stale/missing deps, method ambiguities, type stability of `step!`, explicit imports, zero allocations | Aqua.jl, JET.jl (`test_package`, `@test_opt`), ExplicitImports.jl, AllocCheck.jl / `@allocated` |
 | Python wrapper | `tests/ml` smoke tests, and the Replay tests with their setup run in Python and exported (§4.5), parametrised over the backend | pytest `-m julia` |
@@ -755,9 +754,10 @@ The versions are the latest in the General registry as of 2026-10-30.
 
 ### 4.7 CI
 
-A path-filtered workflow `julia.yml` triggers on `julia/**` and on the exporters of the conformance data
-(`tests/conformance/**`). A cheap `conformance.yml` re-runs those exporters whenever `flatland/**`, the exporters or
-the data change, and fails if the committed data is stale.
+A path-filtered workflow `julia.yml` triggers on `julia/**`, and on `flatland/**`, `tests/conformance/**` and
+`requirements.txt`, since its tests run the Python package of the same checkout in-process (PythonCall.jl with
+`JULIA_CONDAPKG_BACKEND=Null` and the interpreter of `actions/setup-python`): a Python change that alters the
+semantics fails them.
 
 - **Test matrix:** Julia `lts`, `1` and `pre` on ubuntu; macOS and Windows on `1`.
   - Steps: `julia-actions/setup-julia@v3`, `julia-actions/cache@v3`, `julia-buildpkg` and `julia-runtest` with
@@ -771,7 +771,6 @@ the data change, and fails if the committed data is stale.
 - **Benchmarks:** the AirspeedVelocity action has no subdirectory input, and the `benchpkg` CLI is untested with named
   revisions of a package in a subdirectory. So check out the base and the head in two worktrees and run
   `benchpkg --rev dirty --path <worktree>/julia/Flatland --script ...` in each, with separate output directories.
-- **Conformance:** a Python job exports golden traces from `HEAD` as an artifact, and a Julia job replays them.
 - **Wrapper:** install `.[julia]` and run `pytest -m julia`.
 - **Bots:**
   - CompatHelper with `subdirs=["julia/Flatland", "julia/Flatland/docs"]`.
@@ -802,8 +801,8 @@ Each milestone is one PR of under 1000 added lines (generated data excluded), ex
 | # | milestone | acceptance criterion |
 |---|---|---|
 | M0a | Python: deterministic order where a set's iteration order changes results (bugs 10 and 14); fix bugs 6–8 (§3.10) | failing tests first; regression corpus unchanged or updated knowingly |
-| M0b | Python: JSON state schema v1 (§4.2) | pickle ↔ JSON round trip on every committed fixture |
-| M0c | Python: `flatland-trace/1` exporter | re-running it gives byte-identical output |
+| M0b | Python: JSON state schema v1 (§4.2); not needed by the Julia tests, which read the Python env in-process | pickle ↔ JSON round trip on every committed fixture |
+| M0c | Python: `flatland-trace/1` exporter; replaced by in-process step-by-step comparisons in the Julia tests | re-running it gives byte-identical output |
 | M1 | `julia/Flatland` scaffold, `julia.yml`, Aqua/JET/ExplicitImports/format/docs | CI green |
 | M1b | spike: juliacall calls a trivial function inside the Docker image | cold-start time and image size recorded; fork/spawn behaviour documented |
 | M2 | `EntryPointNetwork` for grid rails (resources included), then graph rails in a second PR | exhaustive table equality with Python |

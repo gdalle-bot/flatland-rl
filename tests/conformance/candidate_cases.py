@@ -1,6 +1,6 @@
 """
-Export the collect phase's per-agent candidates that Flatland.jl's tests compare against
-(julia/Flatland/test/data/candidates.json).
+The collect phase's per-agent candidates that Flatland.jl's tests compare against, as plain lists and dicts (see
+`candidate_data`).
 
 Each record holds the inputs of one call of `AbstractRailEnv.collect` (the agent's pre-step state, the action and the
 entry point that action leads to), its outputs (candidate entry points, speed and distance), and the row of
@@ -10,14 +10,10 @@ entry point that action leads to), its outputs (candidate entry points, speed an
   combinations of Table 1 that episodes seldom produce (e.g. a malfunction while reaching the target, or an invalid
   departure). Its entry points are opaque indices: initial 1, current 2, next 3, the action's target 4, an off-map
   agent's target 5. It is thinned to one record per row, action (except for done agents) and combination of flags.
-
-Usage: python tests/conformance/export_candidates.py julia/Flatland/test/data/candidates.json
 """
 import itertools
-import json
 import math
 import random
-import sys
 from fractions import Fraction
 from types import SimpleNamespace
 from typing import NamedTuple, Optional
@@ -301,7 +297,11 @@ def synthetic_config_record(max_speed, acceleration_delta, braking_delta, remove
     }
 
 
-if __name__ == "__main__":
+def candidate_data():
+    """
+    The records of the episodes and of the synthetic grid, in a dict of plain lists, ints, bools and `None`s. Raises
+    an `AssertionError` if a row of Table 1 has no record.
+    """
     episodes = [
         config_record(seed=1, acceleration_delta=Fraction(1), braking_delta=-Fraction(1), remove_agents_at_target=True, p_level_free=0.0,
                       max_rail_pairs_in_city=2),
@@ -315,8 +315,6 @@ if __name__ == "__main__":
                  for (max_speed, acceleration, braking), remove in itertools.product(SYNTHETIC_PROFILES, (True, False))]
     for name, configs in (("episodes", episodes), ("synthetic", synthetic)):
         rows = [record[0] for config in configs for record in config["records"]]
-        print(name, {row: rows.count(row) for row in TABLE_1_ROWS})
         missing = [row for row in TABLE_1_ROWS if row not in rows]
         assert not missing, f"Table 1 rows without {name} records: {missing}"
-    with open(sys.argv[1], "w") as f:
-        json.dump({"fields": FIELDS, "episodes": episodes, "synthetic": synthetic}, f, separators=(",", ":"))
+    return {"fields": FIELDS, "episodes": episodes, "synthetic": synthetic}
