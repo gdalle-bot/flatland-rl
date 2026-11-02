@@ -2,15 +2,15 @@
 # with PythonCall. The Python interpreter needs the dependencies of `requirements.txt`: point PythonCall to it with the
 # environment variables `JULIA_CONDAPKG_BACKEND=Null` and `JULIA_PYTHONCALL_EXE=/path/to/python`.
 
-using PythonCall: Py, pyconvert, pyimport, pyisinstance, pybuiltins, pyis
+using PythonCall: Py, PyArray, pyconvert, pyhasattr, pyimport, pyisinstance, pybuiltins, pyis
 
 # the root of the repository, whose `flatland` package is the one under test
 const REPOSITORY = dirname(dirname(dirname(@__DIR__)))
 
 const PYTHON_SETUP = """
-    the tests of Flatland.jl run the Python package `flatland` of the repository checkout containing them, with \
-    PythonCall and a Python interpreter that has the packages of requirements.txt installed: set the environment \
-    variables JULIA_CONDAPKG_BACKEND=Null and JULIA_PYTHONCALL_EXE=/path/to/python"""
+the tests of Flatland.jl run the Python package `flatland` of the repository checkout containing them, with \
+PythonCall and a Python interpreter that has the packages of requirements.txt installed: set the environment \
+variables JULIA_CONDAPKG_BACKEND=Null and JULIA_PYTHONCALL_EXE=/path/to/python"""
 
 """
     python_module(name)
@@ -42,8 +42,8 @@ end
 """
     julia_data(x::Py)
 
-Convert plain Python data (nested dicts with string keys, lists, tuples, ints, floats, bools, strings and `None`)
-to `Dict{String, Any}`, `Vector{Any}`, `Int`, `Float64`, `Bool`, `String` and `nothing`.
+Convert plain Python data (nested dicts with string keys, lists, tuples, ints, floats, bools, strings, `None` and
+numpy arrays) to `Dict{String, Any}`, `Vector{Any}`, `Int`, `Float64`, `Bool`, `String`, `nothing` and `Array`s.
 """
 function julia_data(x::Py)
     b = pybuiltins
@@ -61,6 +61,8 @@ function julia_data(x::Py)
         return Dict{String, Any}(pyconvert(String, k) => julia_data(v) for (k, v) in x.items())
     elseif pyisinstance(x, b.list) || pyisinstance(x, b.tuple)
         return Any[julia_data(v) for v in x]
+    elseif pyhasattr(x, "__array_interface__")
+        return copy(PyArray(x))
     else
         throw(ArgumentError("cannot convert Python data of type $(pyconvert(String, b.type(x).__name__))"))
     end
