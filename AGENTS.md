@@ -398,7 +398,9 @@ how `step()`, `TrainStateMachine`, or `MotionCheck` internally arrive at that ou
 - `scripts/make_coverage.py` — runs the suite under `coverage`, generates an HTML report, opens it in a browser
   (same as `tox -e coverage`).
 - `julia/Flatland/` — the Julia package `Flatland.jl`, a port of the simulator that must reproduce the Python
-  trajectories exactly (work in progress, see `REVAMP.md` §4). It is a separate package with its own `Project.toml`,
+  trajectories exactly (work in progress, see `REVAMP.md` §4). On the branch where it is developed, the Python package
+  is its unchanged reference: change `flatland/` only to make its results reproducible across languages (e.g. to
+  remove a dependence on set iteration order), never for speed. It is a separate package with its own `Project.toml`,
   tests and docs, and its own CI (`.github/workflows/julia.yml`, triggered by changes under `julia/` or
   `tests/conformance/`). It is not part of the Python package: `MANIFEST.in` prunes it from the sdist, and
   release-please ignores it. Run its tests with `julia --project=julia/Flatland -e 'using Pkg; Pkg.test()'`; format
