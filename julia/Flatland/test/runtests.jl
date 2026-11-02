@@ -27,4 +27,7 @@ include("python.jl")
     @testset verbose = true "MotionCheck" begin
         include("motion_check.jl")
     end
+    @testset verbose = true "Random numbers and malfunctions" begin
+        include("rng.jl")
+    end
 end
