@@ -1,12 +1,19 @@
 # Flatland revamp: algorithmic speed-ups and a Julia rewrite
 
 This document plans how to make the Flatland simulator fast. It has two prongs, implemented as successive PRs into
-the `revamp` branch of this repository:
+two branches of this repository, `revamp` for the first and `julia` for the second (see below):
 
 1. **Python speed-ups** (§3): algorithmic and data-structure changes inside this repository, in the spirit of
    [#68](https://github.com/flatland-association/flatland-rl/pull/68).
 2. **A Julia rewrite** (§4): a Julia core in `julia/Flatland/` in this repository, with a thin Python wrapper that
    keeps the `RailEnv` / PettingZoo / RLlib API.
+
+**The two prongs live on separate branches.** The Python speed-ups are on the `revamp` branch. The `julia` branch
+holds the Julia port only: there, the Python package stays the unchanged reference that the port reproduces, changed
+only where that makes its results reproducible across languages, e.g. where an iteration over a `set` made them depend
+on `PYTHONHASHSEED` (bugs 10 and 14 of §3.10). The other bugs of §3.10 stay, and the port reproduces them. Python
+code that the port needs, such as the Python side of its tests, lives outside the `flatland` package. On that branch,
+§3 is the analysis of where Python spends its time, which the Julia design (§4.3) follows.
 
 Everything below refers to `main` at `51f5621c`. Claims are tagged:
 
@@ -49,8 +56,8 @@ Everything below refers to `main` at `51f5621c`. Claims are tagged:
   - Julia must reproduce Python's trajectories bit for bit, checked on golden traces in CI.
   - The plan is 16 milestones (M0a–M12), each one or two PRs of under 1000 lines.
 - **The two prongs share one data model.** Integer entry points, integer ticks, multi-source distance maps and a
-  segment graph are both the main Python speed-ups and the Julia core's design. Doing them in Python first speeds
-  up users now and shrinks the gap the conformance tests must cover.
+  segment graph are both the main Python speed-ups and the Julia core's design. On the `revamp` branch, doing them
+  in Python first speeds up users now; on the `julia` branch, the Python package keeps its current data model.
 
 ## 1. Why speed matters
 
@@ -218,6 +225,9 @@ cProfile inflates call-heavy code, so these are relative shares of *profiled* ti
   - A* (after #68) is 3%.
 
 ## 3. Prong 1: speed-ups inside the Python codebase
+
+Implemented on the `revamp` branch only (see the top of this document). On the `julia` branch, this section is the
+analysis of where the Python simulator spends its time, which guides the Julia design.
 
 Each item gives:
 - where (`file:line`);
@@ -537,7 +547,7 @@ trajectories, observations or distance maps where the impact is "none"), and get
 | P12 | Malfunction fast path behind a flag | rng |
 | P13 | Trajectories: snapshot interval, observation reuse, typed info | api / format |
 | P13b | Peripheral: Redis pipelining, lazy `matplotlib` import, gym flattening into a preallocated array | none |
-| P14 | Bug fixes 3, 4 and 6–15, one PR each (6–8, 10 and 14 are also milestone M0a) | obs / api |
+| P14 | Bug fixes 3, 4 and 6–15, one PR each (10 and 14 are also milestone M0a) | obs / api |
 | P15 | CI profiling covers the defaults, observation builders, load/clone and L-size scenarios; today only config b at M is profiled | — |
 
 The "none" PRs are also checked against the existing regression corpus: `benchmarks/benchmark_episodes.py`, 113
@@ -715,7 +725,7 @@ The versions are the latest in the General registry as of 2026-10-30.
   ([docs](https://juliapy.github.io/PythonCall.jl/stable/juliacall-reference/)).
 - An array-returning `step_arrays` next to the dict-based `step`. Building Python dicts of infos, rewards and dones
   costs about as much as `get_info_dict` alone, 0.3 ms per step at M [measured], which caps the end-to-end gain of
-  the dict API at about 10× over today's 3.2 ms (3.2 / 0.3), and less against Python with P1–P9 landed [estimate].
+  the dict API at about 10× over today's 3.2 ms (3.2 / 0.3), and less against Python with P1–P9 landed (`revamp`) [estimate].
 - A batched `step_many` amortises the call overhead.
 
 **The `RailEnvView` facade.**
@@ -728,7 +738,7 @@ The versions are the latest in the General registry as of 2026-10-30.
 - The only mutation API is `set_malfunction(handle, n, phase)`, which is all that the effects generators of the tests
   need. Tests that set up states by hand (the `Replay` tables, `tests/test_utils.py:105-134`) run their setup on a
   Python env, export the state (§4.2) and load it into Julia. `DummyPredictorForRailEnv`, which mutates agents (bug
-  8), is unsupported until fixed.
+  8), is unsupported.
 
 **Startup latency.**
 - A PrecompileTools workload.
@@ -801,7 +811,7 @@ Each milestone is one PR of under 1000 added lines (generated data excluded), ex
 
 | # | milestone | acceptance criterion |
 |---|---|---|
-| M0a | Python: deterministic order where a set's iteration order changes results (bugs 10 and 14); fix bugs 6–8 (§3.10) | failing tests first; regression corpus unchanged or updated knowingly |
+| M0a | Python: deterministic order where a set's iteration order changes results (bugs 10 and 14, §3.10); the other bugs stay, and the Julia port reproduces them | failing tests first; regression corpus unchanged or updated knowingly |
 | M0b | Python: JSON state schema v1 (§4.2) | pickle ↔ JSON round trip on every committed fixture |
 | M0c | Python: `flatland-trace/1` exporter | re-running it gives byte-identical output |
 | M1 | `julia/Flatland` scaffold, `julia.yml`, Aqua/JET/ExplicitImports/format/docs | CI green |
@@ -842,7 +852,8 @@ should be 4–6k lines plus tests.
 
 ## 5. How the two prongs combine
 
-Recommended order:
+This was the order planned for both prongs on one branch; they now live on separate branches (see the top of this
+document).
 
 1. **Python quick wins: P1–P7.** Apart from P1's default change, they don't change outputs. They remove most of the
    measured cost for observation users: the tree observation, global observation, predictor, checks and the
@@ -854,7 +865,7 @@ Recommended order:
 4. **The remaining Python items** (P11–P15) whenever convenient.
 
 The decision point is after M5, measured end to end through the Python API for configs b and c, against Python with
-P1–P9 landed. If the Julia backend is not at least 10× faster through `step_arrays` at M and L for config b (the
+P1–P9 landed (the `revamp` branch) and against the unchanged Python of the `julia` branch. If the Julia backend is not at least 10× faster through `step_arrays` at M and L for config b (the
 dict-based `step` cannot reach 10×, §4.5) [estimate: the dynamics alone should gain two orders of magnitude], stop
 after Prong 1 and keep Python only. Config c only counts after M9.
 

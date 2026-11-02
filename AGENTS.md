@@ -121,14 +121,12 @@ a node-id string for graph.
   returns `(position, direction % 2)` so the two crossing axes count as distinct resources. Graph's
   `GraphResourceMap` is identity on the node id.
 - **Distance-map subsystem** (`core/entry_point_distance_map.py`, `core/distance_map.py`,
-  `core/distance_map_walker.py`) — `EntryPointDistanceMap` (agent-agnostic: the agents and the rail) →
-  `AgentSourceTargetDistanceMap` (agent-handle-aware, shared template-method `_compute()`) → concrete `DistanceMap`
-  (grid, numpy array) / `GraphDistanceMap` (graph, nested dict). `DistanceMapWalker` fills it in with one backward
-  BFS per distinct set of targets, started from all of them at distance 0, so every entry point gets its distance to
-  the nearest target; agents with the same targets copy the first one's distances. Shortest paths memoize their next
-  hops per distance row, so distances change only through `set()`, `reset()` or a recomputation, never by writing
-  into the array `get()` returns. `RailEnv` keeps one `distance_map` instance alive across `reset()` calls rather
-  than reconstructing it per episode.
+  `core/distance_map_walker.py`) — `EntryPointDistanceMap` (agent-agnostic, keyed by
+  `(source_config, target_config)`) → `AgentSourceTargetDistanceMap` (agent-handle-aware, shared template-method
+  `_compute()`) → concrete `DistanceMap` (grid, numpy array) / `GraphDistanceMap` (graph, nested dict).
+  `DistanceMapWalker` does the backward BFS that fills it in, one independent walk per target entry point
+  (a shared visited set across targets silently breaks on cyclic/looped layouts). `RailEnv` keeps one
+  `distance_map` instance alive across `reset()` calls rather than reconstructing it per episode.
 
 ### `flatland/envs/` — env control flow
 
@@ -242,15 +240,10 @@ correctness net verifying every per-agent speed/distance/position update and res
 matches exactly what the action/state-machine/motion-check outcome implies, not part of normal control flow.
 Since these live in `AbstractRailEnv` itself (not a subclass override), `RailEnv` and `GraphRailEnv` both run
 them identically - `RailEnv.step()`'s own override only adds `_update_agent_positions_map()` after calling
-`super().step()`. All are gated behind the `check_step_pre_post_conditions` constructor flag (`RailEnv`,
-`GraphRailEnv` and its factories; `GraphRailEnv.from_rail_env` follows the source env by default). Its default
-`None` defers to the `FLATLAND_CHECK_STEP_PRE_POST_CONDITIONS` environment variable
-(`default_check_step_pre_post_conditions()`: `1`/`true`/`yes`/`on` turn the checks on, unset/`0`/`false`/`no`/`off`
-leave them off, anything else raises), so the checks are off by default: they make a step without observations
-noticeably slower. The repository-root `conftest.py` sets the variable for every pytest run in this repository
-(including `pytest benchmarks/benchmark_episodes.py`), and the tox `examples`/`notebooks` envs set it too since
-they run outside pytest. `examples/flatland_performance_profiling.py`'s `get_rail_env()` passes `False`
-explicitly, since that script exists specifically to profile `step()`'s own cumulative time.
+`super().step()`. All are gated behind the `check_step_pre_post_conditions` constructor flag (default `True`)
+so the extra per-step overhead can be disabled where it matters - `examples/flatland_performance_profiling.py`'s
+`get_rail_env()` defaults it to `False`, since that script exists specifically to profile `step()`'s own
+cumulative time and the assertions would otherwise inflate every measurement.
 
 `_check_position_update_postconditions`/`_check_speed_distance_speedup_postconditions` branch purely on position
 (`current_entry_point is None`) and resource/malfunction/action outcomes, never on `agent.state` - the
@@ -405,7 +398,9 @@ how `step()`, `TrainStateMachine`, or `MotionCheck` internally arrive at that ou
 - `scripts/make_coverage.py` — runs the suite under `coverage`, generates an HTML report, opens it in a browser
   (same as `tox -e coverage`).
 - `julia/Flatland/` — the Julia package `Flatland.jl`, a port of the simulator that must reproduce the Python
-  trajectories exactly (work in progress, see `REVAMP.md` §4). It is a separate package with its own `Project.toml`,
+  trajectories exactly (work in progress, see `REVAMP.md` §4). On the branch where it is developed, the Python package
+  is its unchanged reference: change `flatland/` only to make its results reproducible across languages (e.g. to
+  remove a dependence on set iteration order), never for speed. It is a separate package with its own `Project.toml`,
   tests and docs, and its own CI (`.github/workflows/julia.yml`, triggered by changes under `julia/` or
   `tests/conformance/`). It is not part of the Python package: `MANIFEST.in` prunes it from the sdist, and
   release-please ignores it. Run its tests with `julia --project=julia/Flatland -e 'using Pkg; Pkg.test()'`; format
