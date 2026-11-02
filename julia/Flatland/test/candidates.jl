@@ -4,6 +4,8 @@ using Flatland: cap_speed, distance_after_crossing, distance_without_crossing, i
 using JET: JET
 using Test
 
+@isdefined(julia_data) || include("python.jl")
+
 # computed by the Python package, see tests/conformance/candidate_cases.py
 const CANDIDATES = julia_data(python_module("tests.conformance.candidate_cases").candidate_data())
 

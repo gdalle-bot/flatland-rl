@@ -3,6 +3,8 @@ using Flatland: ALL_ACTIONS
 using JET: JET
 using Test
 
+@isdefined(julia_data) || include("python.jl")
+
 # computed by the Python package, see tests/conformance/topology_cases.py
 const TOPOLOGY = julia_data(python_module("tests.conformance.topology_cases").topology_data())
 

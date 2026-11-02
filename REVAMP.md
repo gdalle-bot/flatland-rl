@@ -52,7 +52,7 @@ Everything below refers to `main` at `51f5621c`. Claims are tagged:
   a step with a built-in observation builder, about 1% at L).
 - **The Julia rewrite is a dynamics-parity port, not a fork.**
   - Python keeps scenario generation and stays the reference implementation.
-  - Julia must reproduce Python's trajectories bit for bit, checked on golden traces in CI.
+  - Julia must reproduce Python's trajectories bit for bit, checked in CI by stepping both on the same episodes.
   - The plan is 16 milestones (M0a–M12), each one or two PRs of under 1000 lines.
 - **The two prongs share one data model.** Integer entry points, integer ticks, multi-source distance maps and a
   segment graph are both the main Python speed-ups and the Julia core's design. Doing them in Python first speeds
@@ -591,12 +591,14 @@ These help both prongs:
    - rationals stored as `[num, den]`.
 
    Round-trip pickle ↔ JSON on every committed fixture.
-2. **A golden-trace exporter**, `flatland-trace/1`: `{semantics_version, scenario, steps: [{inject, actions, post}]}`.
-   - It records Replay tables by instrumenting `run_replay_config` (`tests/test_utils.py`): those tables are Python
-     expressions with imperative setup, so the trace stores the post-injection state, not a recipe.
-   - It also records random-policy episodes and the realised malfunction schedule.
-   - The traces are generated from `HEAD` in CI rather than taken from the archived benchmark episodes. The step
-     semantics still move fast: in the six months before `51f5621c`, 141 commits touched `rail_env.py`,
+2. **Step-by-step comparisons, in-process.** The Julia tests run the Python package of the same checkout with
+   PythonCall.jl: they build envs in Python, import their state into Julia, step both with the same actions and
+   compare everything after each step. This replaces exported golden traces, which would need an exporter, a trace
+   format and a check that they are up to date.
+   - Replay tables (`run_replay_config`, `tests/test_utils.py`) are Python expressions with imperative setup, so the
+     comparison starts from the state after that setup, not from a recipe.
+   - It covers seeded random-policy episodes, malfunctions included.
+   - It runs against `HEAD` rather than the archived benchmark episodes. The step semantics still move fast: in the six months before `51f5621c`, 141 commits touched `rail_env.py`,
      `step_utils/` and `agent_chains.py` (163 counting `rewards.py`, `agent_utils.py` and `malfunction_generators.py`),
      and
      `tests/test_flatland_regression_episodes.py` is skipped because a timing fix made its episodes diverge.
@@ -697,7 +699,7 @@ The versions are the latest in the General registry as of 2026-10-30.
 | flake8, deptry | lint | Runic.jl 1.13 (as in DifferentiationInterface.jl), Aqua.jl 0.8, ExplicitImports.jl 1.15, JET.jl 0.9.9–0.13 (only JET ≤ 0.9.18 runs on the 1.10 LTS: 0.9.19 needs Julia ≥ 1.11, and 0.10 and later need ≥ 1.12) |
 | cProfile, line_profiler | profiling | Profile stdlib, Chairmarks.jl 1.3, AirspeedVelocity.jl 0.6, AllocCheck.jl 0.2 |
 | jupyter-book (flatland-book) | docs | Documenter.jl 1.19 + Literate.jl 2.21 + DocumenterCitations.jl 1.5; a page in the flatland-book |
-| juliacall (new) | Python wrapper | PythonCall.jl 0.9.37, test-only (differential tests): juliacall pins its own exact PythonCall version, so Flatland.jl must not depend on it. With `JULIA_CONDAPKG_BACKEND=Null` and `JULIA_PYTHONCALL_EXE`, CI reuses the Python venv instead of a Conda one |
+| juliacall (new) | Python wrapper | PythonCall.jl 0.9.37, test-only (all comparisons with Python): juliacall pins its own exact PythonCall version, so Flatland.jl must not depend on it. With `JULIA_CONDAPKG_BACKEND=Null` and `JULIA_PYTHONCALL_EXE`, CI reuses the Python venv instead of a Conda one |
 | — | latency | PrecompileTools.jl 1.2–1.3 (1.3 needs Julia ≥ 1.12); optional PackageCompiler sysimage |
 
 ### 4.5 Python interop
@@ -800,8 +802,8 @@ semantics fails them.
 - Documenter.jl docs in `julia/Flatland/docs`, with Literate.jl tutorials replacing notebooks and
   DocumenterCitations.jl for the references above.
 - A "Julia backend" page in the flatland-book.
-- A contributor guide on changing semantics in both implementations: bump `SEMANTICS_VERSION`, regenerate traces,
-  both sides green. `CODEOWNERS` for `julia/` and the step code.
+- A contributor guide on changing semantics in both implementations: bump `SEMANTICS_VERSION`, change both until the
+  comparisons pass. `CODEOWNERS` for `julia/` and the step code.
 
 ### 4.9 Milestones
 
@@ -810,15 +812,15 @@ Each milestone is one PR of under 1000 added lines (generated data excluded), ex
 | # | milestone | acceptance criterion |
 |---|---|---|
 | M0a | Python: deterministic order where a set's iteration order changes results (bugs 10 and 14, §3.10); the other bugs stay, and the Julia port reproduces them | failing tests first; regression corpus unchanged or updated knowingly |
-| M0b | Python: JSON state schema v1 (§4.2); not needed by the Julia tests, which read the Python env in-process | pickle ↔ JSON round trip on every committed fixture |
-| M0c | Python: `flatland-trace/1` exporter; replaced by in-process step-by-step comparisons in the Julia tests | re-running it gives byte-identical output |
+| M0b | Python: JSON state schema v1 (§4.2), for the state import of the wrapper (M8); the Julia tests read the Python env in-process | pickle ↔ JSON round trip on every committed fixture |
+| M0c | dropped: the Julia tests compare step by step in-process (§4.2) | — |
 | M1 | `julia/Flatland` scaffold, `julia.yml`, Aqua/JET/ExplicitImports/format/docs | CI green |
 | M1b | spike: juliacall calls a trivial function inside the Docker image | cold-start time and image size recorded; fork/spawn behaviour documented |
 | M2 | `EntryPointNetwork` for grid rails (resources included), then graph rails in a second PR | exhaustive table equality with Python |
 | M3 | integer ticks and the three `_candidate_*` functions | every case of `design_by_contract.md` Table 1 matches; zero allocations |
 | M4 | MotionCheck | differential fuzzing passes; O(n + p) |
-| M5 | `step!` + state import/export, malfunctions from an explicit schedule | positions, speeds, distances, states and dones of all golden traces bit-identical (rewards come with M6, seeded malfunctions with M7); no allocations once buffers are sized |
-| M6 | distance map; rewards (`DefaultRewards`, `ECML2026Rewards`, `DelayRewards`, `PunctualityRewards`, `BasicMultiObjectiveRewards`), 2 PRs | distance arrays and reward traces equal |
+| M5 | `step!` + state import from a Python env | positions, speeds, distances, states and dones bit-identical to Python's after every step of seeded episodes (rewards come with M6, seeded malfunctions with M7); no allocations once buffers are sized |
+| M6 | distance map; rewards (`DefaultRewards`, `ECML2026Rewards`, `DelayRewards`, `PunctualityRewards`, `BasicMultiObjectiveRewards`), 2 PRs | distance arrays equal; rewards bit-identical after every step |
 | M7 | `NumpyLegacyRNG` + `ParamMalfunctionGen` | streams equal numpy's; seeded episodes identical without a schedule |
 | M8 | Python wrapper and facade (`flatland/juliapkg.json`, `[julia]` extra) | `tests/ml` PettingZoo/RLlib smoke tests pass on the Julia backend; built-in Python observations identical through the facade |
 | M9 | Julia tree observation (segment graph) + predictor, 2 PRs; before registration, since without observations the Julia backend gives users no end-to-end speed-up (§5) | observation arrays equal to the Python versions after §3.1 |
