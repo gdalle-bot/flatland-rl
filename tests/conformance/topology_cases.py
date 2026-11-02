@@ -1,16 +1,12 @@
 """
-Export the Python topology semantics that Flatland.jl's tests compare against (julia/Flatland/test/data/topology.json):
+The Python topology semantics that Flatland.jl's tests compare against, as plain lists and dicts (see
+`topology_data`):
 - `_check_action_new` for every valid cell code, heading and action;
 - every valid entry point of two generated 30x30 sparse rails (one with level-free crossings);
 - every entry point, valid or not, of small random non-square grids filled with random valid cell codes. They are not
   closed rails, so moves off the grid, into empty cells, into dead ends and facing symmetric switches all occur, and
   level-free crossings are anywhere, borders included.
-
-Usage: python tests/conformance/export_topology.py julia/Flatland/test/data/topology.json
 """
-import json
-import sys
-
 import numpy as np
 
 from flatland.core.env_observation_builder import DummyObservationBuilder
@@ -90,12 +86,11 @@ def rail_record(seed, p_level_free):
     }
 
 
-if __name__ == "__main__":
-    data = {
+def topology_data():
+    """All the records above, in a dict of plain lists, ints, bools and `None`s."""
+    return {
         "entry_point_fields": ENTRY_POINT_FIELDS,
         "check_action": check_action_table(),
         "rails": [rail_record(1, 0.0), rail_record(2, 1.0)],
         "random_rails": random_rail_records(20, seed=0),
     }
-    with open(sys.argv[1], "w") as f:
-        json.dump(data, f, separators=(",", ":"))
