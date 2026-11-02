@@ -8,6 +8,12 @@ the `revamp` branch of this repository:
 2. **A Julia rewrite** (§4): a Julia core in `julia/Flatland/` in this repository, with a thin Python wrapper that
    keeps the `RailEnv` / PettingZoo / RLlib API.
 
+**The two prongs live on separate branches.** The Python speed-ups are on the `revamp` branch. The `julia` branch
+holds the Julia port only: there, the Python package stays the unchanged reference that the port reproduces, changed
+only where that makes its results reproducible across languages, e.g. where an iteration over a `set` made them depend
+on `PYTHONHASHSEED` (bugs 10 and 14 of §3.10). On that branch, §3 is the analysis of where Python spends its time,
+which the Julia design (§4.3) follows.
+
 Everything below refers to `main` at `51f5621c`. Claims are tagged:
 
 - **[measured]**: profiled on this commit (§2, Appendix A).
@@ -218,6 +224,9 @@ cProfile inflates call-heavy code, so these are relative shares of *profiled* ti
   - A* (after #68) is 3%.
 
 ## 3. Prong 1: speed-ups inside the Python codebase
+
+Implemented on the `revamp` branch only (see the top of this document). On the `julia` branch, this section is the
+analysis of where the Python simulator spends its time, which guides the Julia design.
 
 Each item gives:
 - where (`file:line`);
@@ -801,7 +810,7 @@ Each milestone is one PR of under 1000 added lines (generated data excluded), ex
 
 | # | milestone | acceptance criterion |
 |---|---|---|
-| M0a | Python: deterministic order where a set's iteration order changes results (bugs 10 and 14); fix bugs 6–8 (§3.10) | failing tests first; regression corpus unchanged or updated knowingly |
+| M0a | Python: deterministic order where a set's iteration order changes results (bugs 10 and 14, §3.10); the other bugs stay, and the Julia port reproduces them | failing tests first; regression corpus unchanged or updated knowingly |
 | M0b | Python: JSON state schema v1 (§4.2) | pickle ↔ JSON round trip on every committed fixture |
 | M0c | Python: `flatland-trace/1` exporter | re-running it gives byte-identical output |
 | M1 | `julia/Flatland` scaffold, `julia.yml`, Aqua/JET/ExplicitImports/format/docs | CI green |
@@ -842,7 +851,8 @@ should be 4–6k lines plus tests.
 
 ## 5. How the two prongs combine
 
-Recommended order:
+This was the order planned for both prongs on one branch; they now live on separate branches (see the top of this
+document).
 
 1. **Python quick wins: P1–P7.** Apart from P1's default change, they don't change outputs. They remove most of the
    measured cost for observation users: the tree observation, global observation, predictor, checks and the
