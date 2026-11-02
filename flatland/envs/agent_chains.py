@@ -11,7 +11,6 @@ MotionCheck ensures:
 - no two agents must be allowed to move to the same target cell (resource)
 - if all agents in the chain run at the same speeed, all can run (behaviour not depending on agent indices)
 """
-from collections import deque
 from typing import Tuple, Dict, Optional, List
 
 AgentHandle = int
@@ -318,9 +317,7 @@ class MotionCheck(object):
         - deadlocked agents are stopped
         - for each conflict, one of the agents is stopped.
 
-        Termination: each queued target conflict is processed once. Processing one appends new conflicts only when it
-        stops a moving agent, which then stays in place. With each resource held by at most one agent, an agent that
-        stays in place is never stopped again, so finitely many conflicts are appended.
+        Termination: The list of target_conflicts will eventually be empty as in every round, one agent is stopped.
 
         """
         target_conflicts = self._construct_graph()
@@ -357,10 +354,8 @@ class MotionCheck(object):
         return target_conflicts
 
     def _fix_conflicts(self, target_conflicts):
-        # first in, first out: conflicts appended while the queue is processed come last
-        target_conflicts = deque(target_conflicts)
-        while target_conflicts:
-            u, v = target_conflicts.popleft()
+        while len(target_conflicts) > 0:
+            u, v = target_conflicts[0]
             u_pos, u_target = self.agents[u]
             v_pos, v_target = self.agents[v]
             if v_pos == v_target:
@@ -370,6 +365,7 @@ class MotionCheck(object):
                 # v wants to move and they have same target, then stop v, which has larger index (lower index wins)
                 target_conflicts = self._stop_and_update_target_conflicts(target_conflicts, v, v_pos, v_target)
             # else: no conflict any more, forget
+            target_conflicts = target_conflicts[1:]
 
     def _stop_and_update_target_conflicts(self, target_conflicts, v, v_pos, v_target):
         self.agents[v] = (v_pos, v_pos)

@@ -4,7 +4,7 @@ name: Julia
 # checkout, run in-process, so they run when either package changes.
 on:
     push:
-        branches: [ "main", "revamp" ]
+        branches: [ "main", "revamp", "julia" ]
         # tags of the Julia package, for the docs of each release (path filters do not apply to tags)
         tags: [ "Flatland-v*" ]
         paths: [ "julia/**", "flatland/**", "tests/conformance/**", "requirements.txt", ".github/workflows/julia.yml" ]
