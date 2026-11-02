@@ -170,7 +170,7 @@ class GraphTransitionMap(TransitionMap[GridNode, GridEdge, bool, RailEnvActions]
         r, c, d = ast.literal_eval(s)
         return ((r, c), d)
 
-    @lru_cache(maxsize=4_000_000)
+    @lru_cache
     def get_successor_entry_points(self, entry_point: GridNode) -> Set[GridNode]:
         """
         The successors of an entry point, in the order of grid rails.
